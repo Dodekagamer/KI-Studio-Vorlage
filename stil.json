@@ -1,0 +1,32 @@
+{
+ "_info": "Maschinenlesbarer Teil von Stil-Leitfaden.md. Die Werkzeuge lesen diese Datei (neues_reel.py, schnitt/edl.py, render.py, storyboard.py, vfx/reelvfx.py, analyse/shotliste.py). Bei Änderungen Stil-Leitfaden.md im selben Zug anpassen. Prüfen: python3 tools/stil.py",
+ "eingerichtet": false,
+ "marke": "",
+ "nutzer": "",
+ "inhalt": "",
+ "look": "clean",
+ "vignette": 0.12,
+ "kapitel": ["Einstieg", "Aufbau", "Höhepunkt", "Finale"],
+ "budget": {
+  "ramps": 3,
+  "flashes": 2,
+  "shakes": 2,
+  "uebergaenge": 2,
+  "min_beats": 2,
+  "segmente_16": [24, 30]
+ },
+ "punch": {"808": 0.14, "nachschlag": 0.12, "clap": 0.06},
+ "finale": {"beats": 4, "zeitlupe": true, "push": true},
+ "erlaubt": [],
+ "varianten": [
+  {"x": "A", "name": "Story",
+   "idee": "Stil-Leitfaden 1:1: Hook ab der Eins, 16 Takte, 4 Kapitel wie in stil.json, volle Akzent-Karte im Effekt-Budget.",
+   "kurz": "Hook, 16 Takte, Story in 4 Kapiteln"},
+  {"x": "B", "name": "Power",
+   "idee": "anderer Songabschnitt (zweite Hook, Drop oder stärkste andere Phrase) und andere Clips als A (analyse/shotliste.py --meiden …/A/edl.json): stärkste Action-Momente, andere Showpieces, Effekt-Budget voll.",
+   "kurz": "andere Songstelle, andere Clips, Action im Fokus"},
+  {"x": "C", "name": "Clean",
+   "idee": "anderes Tempo: 8 Takte oder ruhigerer Songteil, längere Shots (4 Beats), Punches nur auf die stärksten Akzente, Zeitlupe und Push-ins, nur die besten Momente.",
+   "kurz": "kürzer und ruhiger: 8 Takte, lange Shots, wenige Punches"}
+ ]
+}
