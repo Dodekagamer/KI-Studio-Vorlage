@@ -22,10 +22,11 @@ from reelcfg import WORK, grade_rgb, load_edl, look_spec, meta, stem_of, total_b
 MF = "/usr/share/fonts/truetype/montserrat/Montserrat-"
 BG, FG, MUTED = (14, 14, 14), (240, 240, 240), (150, 150, 150)
 NEON, CYAN, ORANGE, PINK, GREY = (205, 255, 60), (80, 210, 255), (255, 150, 60), (255, 110, 190), (190, 190, 190)
+GOLD = (255, 214, 90)
 TAGC = {"Punch-in": NEON, "Punch ½": NEON, "Mini-Punch": NEON, "Push-in": NEON, "Zoom-out": NEON, "Whip-Zoom": NEON,
-        "Speed-Ramp": CYAN, "Zeitlupe": CYAN, "Freeze-Frame": CYAN,
-        "Flash": ORANGE, "Shake": ORANGE, "Split-Screen": ORANGE, "Echo-Trail": ORANGE, "Glitch": ORANGE,
-        "Whoosh": PINK, "Shutter": PINK, "SFX": PINK}
+        "Speed-Ramp": CYAN, "Zeitlupe": CYAN, "Freeze-Frame": CYAN, "Jump Cut": CYAN,
+        "Flash": ORANGE, "Shake": ORANGE, "Split-Screen": ORANGE, "Echo-Trail": ORANGE, "Glitch": ORANGE, "Blende": ORANGE,
+        "Whoosh": PINK, "Shutter": PINK, "SFX": PINK, "O-Ton": GOLD, "O-Ton vorn": GOLD}
 PALETTE = [(255, 209, 102), (120, 220, 160), (255, 120, 90), (150, 170, 255), (80, 210, 255), (255, 110, 190)]
 MODE = {"ramp": " · Ramp", "ramp_hold": " · Ramp", "slow": " · 0,5×", "fast": " · 1,5×", "freeze": " · Freeze"}
 
@@ -138,7 +139,7 @@ def main(out, use_render=False):
         d.polygon([(lx, ly + 3), (lx + 18, ly + 3), (lx + 9, ly + 16)], fill=FG)
         d.text((lx + 26, ly - 1), "808-Hit", font=font("Medium", 17), fill=FG)
         lx += 60 + d.textlength("808-Hit", font=font("Medium", 17))
-    for lab, c in [("Bewegung/Zoom", NEON), ("Tempo/Zeit", CYAN), ("Kreativ-Effekt", ORANGE), ("Sound-Effekt", PINK)]:
+    for lab, c in [("Bewegung/Zoom", NEON), ("Tempo/Schnitt", CYAN), ("Effekt/Übergang", ORANGE), ("Echter Ton", GOLD)]:
         d.rounded_rectangle([lx, ly, lx + 18, ly + 18], 4, fill=c)
         d.text((lx + 26, ly - 1), lab, font=font("Medium", 17), fill=FG)
         lx += 60 + d.textlength(lab, font=font("Medium", 17))

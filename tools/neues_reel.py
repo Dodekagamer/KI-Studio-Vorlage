@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Neuen Reel-Ordner aus der Vorlage anlegen.
 
-    python3 <projekt>/tools/neues_reel.py <name> [--datum JJJJ-MM-TT]
+    python3 <projekt>/tools/neues_reel.py <name> [--datum JJJJ-MM-TT] [--interview]
 
 Legt reels/<datum>_<name>/ an (Datum = heute, Name klein, ohne Leerzeichen), kopiert reels/_vorlage/
 (README-Steckbrief) und legt die Schnittliste je Variante an: schnitt/A, schnitt/B, schnitt/C (Varianten zur Auswahl,
 Namen und Ideen aus stil.json "varianten"). Bricht ab, wenn der Ordner schon existiert.
+Mit --interview (Interview-Reel statt der drei Varianten): legt reels/<datum>_<name>/ mit README.md und
+schnitt/schnitt.py aus reels/_vorlage/interview/ an (Stimme führt, Untertitel, Abspann; Kurzanleitung „Interview-Reels“).
 """
 import datetime
 import re
@@ -34,7 +36,14 @@ def main():
     ziel = PROJECT / "reels" / f"{datum}_{name}"
     if ziel.exists():
         sys.exit(f"Gibt es schon: {ziel}")
-    shutil.copytree(VORLAGE, ziel, ignore=shutil.ignore_patterns("__pycache__", "*.json"))
+    if "--interview" in args:
+        (ziel / "schnitt").mkdir(parents=True)
+        for quelle, dahin in ((VORLAGE / "interview" / "README.md", ziel / "README.md"),
+                              (VORLAGE / "interview" / "schnitt.py", ziel / "schnitt" / "schnitt.py")):
+            dahin.write_text(quelle.read_text().replace("{NAME}", name).replace("{DATUM}", datum))
+        print(ziel)
+        return
+    shutil.copytree(VORLAGE, ziel, ignore=shutil.ignore_patterns("__pycache__", "*.json", "interview"))
     p = ziel / "README.md"
     p.write_text(p.read_text().replace("{NAME}", name).replace("{DATUM}", datum))
     edl = ziel / "schnitt" / "edl.py"

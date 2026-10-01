@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
-"""Shotlisten-Vorschlag nach Stil-Leitfaden: 4 Kapitel auf den Song-Phrasen, 2-Beat-Raster,
-Bild-Akzent aus der Akzent-Karte, Clips nach Kapitel-Tags und Clip-Analyse.
+"""Shotlisten-Vorschlag nach Stil-Leitfaden: volle 4-Takt-Phrasen (Länge aus stil.json "laenge_s"), 4 Kapitel auf
+Phrasengrenzen, Szenen meist 4–6 Beats (2 nur für durchgehende Bewegung), Opener und Epic-Shot (0,5×) am Anfang,
+Finale 8 Beats, Bild-Akzent aus der Akzent-Karte, Clips nach Kapitel-Tags und Clip-Analyse.
+Ohne --takte gilt die Länge nach Regel 2 (so viele Phrasen, dass es mindestens laenge_s[0] Sekunden sind).
 
     python3 shotliste.py --song OUT/song.json --tags tags.json -o OUTDIR
     python3 shotliste.py --song OUT/song.json --clips OUT/clips.json --tags tags.json --fenster 2 -o OUTDIR
@@ -11,60 +13,91 @@ Bild-Akzent aus der Akzent-Karte, Clips nach Kapitel-Tags und Clip-Analyse.
 Eingaben:
 - song.json von song_analyse.py (Fenster 1 = Empfehlung; --fenster N oder --start-takt/--takte).
 - clips.json von clip_analyse.py (optional): Dauer, Highlights (peak), Score je Clip.
-- tags.json (optional, sonst nur grober Vorschlag): {"6166": {"kapitel": [3], "tags": ["showpiece"],
-  "desc": "Sprung auf die Box", "moment": 6.4}, ...}; Schlüssel = Clipname ohne "IMG_" und Endung.
-  Format und Tag-Liste: tags_beispiel.json daneben.
+- tags.json (optional, sonst nur grober Vorschlag): {"6166": {"kapitel": [3], "tags": ["showpiece", "explosiv"],
+  "desc": "Sprung auf die Box", "moment": 6.4}, ...}; "epic" = mehrere Leute halten eine starke Pose (Slot 2),
+  "explosiv"/"showpiece" = Highlight eines Kapitels, "durchgehend" = Bewegung ohne Anfang und Ende (darf 2 Beats);
+  Schlüssel = Clipname ohne "IMG_" und Endung. Format und Tag-Liste: tags_beispiel.json daneben.
 
 Ausgabe: shotliste.json (Felder der Render-EDL: n, beat, t, beats, clip, src, mode, fx, fxp, desc) und
-shotliste.md mit Tabelle und Checkliste. Das ist ein Entwurf fürs Storyboard: In-Punkte danach an dichten
-Frames prüfen (Projektanweisungen Punkt 14).
+shotliste.md mit Tabelle und Checkliste. Das ist ein Entwurf fürs Storyboard: Szenenlängen nach der ganzen Aktion
+anpassen und In-Punkte an dichten Frames prüfen (Projektanweisungen Punkt 14). Speed-Ramps setzt der Vorschlag nie
+(Stil-Leitfaden: nur als Ausnahme, von Hand).
 
-Kapitel-Namen, Punch-Stärken und Budget kommen aus stil.json. Eigene Kapitel-Vorlagen gehen dort unter
-"shotliste": {"vorlage16": {"1": [[0, 2, "opener"], …], …}, "vorlage8": {…}, "slot_tags": {"slot": [["tag"], …]}}.
+Kapitel-Namen, Länge, Punch-Stärken und Budget kommen aus stil.json. Eigene Phrasen-Muster gehen dort unter
+"shotliste": {"phrase": {"k1": [[4, "opener"], …], …}, "halb": {"1": […], …}, "slot_tags": {"slot": [["tag"], …]},
+"tempo": {"slot": 0.75}}.
 """
 import argparse
 import json
 import sys
 from pathlib import Path
 
+sys.dont_write_bytecode = True  # kein __pycache__ im geteilten Projektordner
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from stil import STIL  # noqa: E402
 
 KAPITEL = STIL["kapitel"][:4]
-# Vorlage pro Kapitel mit 16 Beats: (Offset, Beats, Slot). Ramp: Anlauf ab Schlag 3 im 2. Takt,
-# Hit auf der Eins im 3. Takt. Kapitel 4 ist der Payoff, der letzte Slot das Finale.
-VORLAGE16 = {
-    1: [(0, 2, "opener"), (2, 2, "branding"), (4, 2, "action"), (6, 4, "ramp"), (10, 2, "action"), (12, 4, "langsam")],
-    2: [(0, 2, "action"), (2, 2, "action"), (4, 2, "nah"), (6, 4, "ramp"), (10, 2, "action"), (12, 4, "langsam")],
-    3: [(0, 2, "power"), (2, 2, "power"), (4, 2, "nah"), (6, 4, "ramp"), (10, 2, "action"), (12, 4, "action")],
-    4: [(0, 2, "payoff"), (2, 2, "payoff"), (4, 2, "emotion"), (6, 2, "emotion"), (8, 2, "gruppe"), (10, 6, "finale")],
+# Slots einer Phrase (16 Beats): (Beats, Slot). Szene so lang wie die ganze Aktion, meist 4–6 Beats;
+# 2 Beats nur im Slot durchgehend (Bewegung ohne Anfang und Ende, Stil-Leitfaden Regel 4).
+# k1 … k4 = erste Phrase des Kapitels, k1+ … = jede weitere; im letzten Kapitel steht k4 (mit dem Finale) am Schluss.
+PHRASE = {
+    "k1": [(4, "opener"), (6, "epic"), (6, "branding")],
+    "k1+": [(4, "branding"), (6, "action"), (6, "action")],
+    "k2": [(4, "action"), (2, "durchgehend"), (6, "highlight"), (4, "action")],
+    "k2+": [(6, "action"), (4, "action"), (2, "durchgehend"), (4, "nah")],
+    "k3": [(4, "power"), (4, "power"), (2, "durchgehend"), (6, "highlight")],
+    "k3+": [(4, "action"), (4, "power"), (4, "nah"), (4, "action")],
+    "k4+": [(4, "payoff"), (4, "payoff"), (4, "emotion"), (4, "emotion")],
+    "k4": [(4, "payoff"), (4, "emotion"), (8, "finale")],
 }
-VORLAGE8 = {
-    1: [(0, 2, "opener"), (2, 2, "branding"), (4, 2, "action"), (6, 2, "action")],
-    2: [(0, 2, "action"), (2, 2, "nah"), (4, 4, "ramp")],
-    3: [(0, 2, "power"), (2, 2, "action"), (4, 4, "ramp")],
-    4: [(0, 2, "payoff"), (2, 2, "emotion"), (4, 4, "finale")],
-}
+# 8 Takte nur auf Wunsch des Nutzers (Teaser): 4 Kapitel à 2 Takte
+HALB = {1: [(4, "opener"), (4, "epic")], 2: [(4, "action"), (4, "highlight")], 3: [(4, "power"), (4, "action")],
+        4: [(4, "emotion"), (4, "finale")]}
+# Opener in leichter Zeitlupe (Regel 11), Epic-Shot und Finale 0,5× (Regeln 11, 12); sonst Echtzeit, nie schneller
+# als 1,0×. Zeitlupe nur aus 60-fps-Material.
+TEMPO = {"opener": 0.75, "epic": 0.5, "finale": 0.5 if STIL["finale"]["zeitlupe"] else 1.0}
+RESERVIERT = {"epic": {"epic"}, "highlight": {"showpiece", "explosiv"}, "finale": {"finale"}}   # Clips für ihren Slot aufheben
+
+
+def takte_regel2(per):
+    """Regel 2: so viele 4-Takt-Phrasen, dass das Reel mindestens laenge_s[0] Sekunden lang ist (wie edlcheck.py)."""
+    return 4 * max(1, int(-(-(STIL["laenge_s"][0] - 0.1) // (16 * per))))
+
+
+def verteilung(n):
+    """Phrasen je Kapitel (Regel 3: 1–3). Unter 4 Phrasen teilen sich Grind und Fight eine."""
+    if n < 4:
+        return [(1, [1], 1), (2, [2, 3], n - 2), (4, [4], 1)] if n == 3 else [(1, [1], 1), (4, [4], 1)]
+    ph = {1: 1, 2: 1, 3: 1, 4: 1}
+    for k in [2, 3, 3, 4, 2, 1, 4] * 4:
+        if sum(ph.values()) == n:
+            break
+        if ph[k] < 3:
+            ph[k] += 1
+    ph[3] += n - sum(ph.values())   # mehr als 12 Phrasen: Rest in Fight & Power
+    return [(k, [k], ph[k]) for k in range(1, 5)]
+
+
 # Welche Tags ein Slot sucht (erste passende Gruppe gewinnt)
 SLOT_TAGS = {
-    "opener": [["opener"], ["gruppe", "branding"], ["branding"], ["gruppe"]],
-    "branding": [["branding"], ["gruppe"]],
-    "action": [["action"], ["power"], ["langsam"]],
+    "opener": [["opener"], ["branding", "gruppe"], ["branding"], ["gruppe"]],
+    "epic": [["epic"], ["gruppe", "branding"], ["gruppe"], ["branding"]],
+    "branding": [["branding"], ["gruppe"], ["action"]],
+    "action": [["action"], ["durchgehend"], ["langsam"]],
+    "durchgehend": [["durchgehend"], ["action"]],
     "nah": [["action", "nah"], ["nah"], ["action"]],
     "langsam": [["langsam"], ["action"]],
-    "ramp": [["showpiece"], ["action", "nah"], ["action"]],
+    "highlight": [["explosiv"], ["showpiece"], ["action"]],
     "power": [["power"], ["schlag"], ["action"]],
     "payoff": [["payoff"], ["emotion"], ["action"]],
     "emotion": [["emotion"], ["payoff"], ["gruppe"]],
-    "gruppe": [["gruppe"], ["emotion"]],
     "finale": [["finale"], ["gruppe", "branding"], ["gruppe"]],
 }
 _eigen = STIL.get("shotliste", {})
-if _eigen.get("vorlage16"):
-    VORLAGE16 = {int(k): [tuple(x) for x in v] for k, v in _eigen["vorlage16"].items()}
-if _eigen.get("vorlage8"):
-    VORLAGE8 = {int(k): [tuple(x) for x in v] for k, v in _eigen["vorlage8"].items()}
+PHRASE.update({k: [tuple(x) for x in v] for k, v in _eigen.get("phrase", {}).items()})
+HALB.update({int(k): [tuple(x) for x in v] for k, v in _eigen.get("halb", {}).items()})
 SLOT_TAGS.update(_eigen.get("slot_tags", {}))
+TEMPO.update(_eigen.get("tempo", {}))
 PUNCH = {"808": STIL["punch"]["808"], "808_nachschlag": STIL["punch"]["nachschlag"], "clap": STIL["punch"]["clap"]}
 BUDGET = STIL["budget"]
 MEIDEN = set()   # Clips anderer Varianten (--meiden): nur nehmen, wenn sonst nichts passt
@@ -82,7 +115,7 @@ def load_pool(clips_json, tags_json):
         if k.startswith("_") or "ausschuss" in v.get("tags", []):
             continue
         pool[k] = dict(clip=k, kapitel=v.get("kapitel", [1, 2, 3, 4]), tags=set(v.get("tags", [])),
-                       desc=v.get("desc", ""), moment=v.get("moment"), dur=None, fps=None, score=50.0,
+                       desc=v.get("desc", ""), moment=v.get("moment"), sauber=v.get("sauber"), dur=None, fps=None, score=50.0,
                        highlights=[], analysiert=False)
     if clips_json:
         for c in json.loads(Path(clips_json).read_text()).get("clips", []):
@@ -94,27 +127,24 @@ def load_pool(clips_json, tags_json):
             p.update(dur=c.get("dur"), fps=c.get("fps"), score=float(c.get("score", 50)),
                      highlights=c.get("highlights", []), analysiert=True, motion=m, flags=c.get("flags", []))
             if not tags:                        # ohne Tags: grob nach Bewegung einteilen
-                p["tags"] = {"action", "nah"} if m > 0 else {"gruppe"}
+                p["tags"] = {"action", "durchgehend"} if m > 0 else {"gruppe"}
     return pool
 
 
-def pick(pool, used, kap, slot, need_s):
+def pick(pool, used, kaps, slot, need_s):
+    frei = lambda p: p["clip"] not in used and (p["dur"] is None or p["dur"] >= need_s) and \
+        all(slot == s or not (tg & p["tags"]) for s, tg in RESERVIERT.items())
     for group in SLOT_TAGS[slot]:
-        cands = [p for p in pool.values() if p["clip"] not in used and kap in p["kapitel"]
-                 and set(group) <= p["tags"] and (p["dur"] is None or p["dur"] >= need_s)
-                 and (slot == "ramp" or "showpiece" not in p["tags"])]     # Showpieces für die Ramps aufheben
+        cands = [p for p in pool.values() if frei(p) and set(kaps) & set(p["kapitel"]) and set(group) <= p["tags"]]
         if not cands:
-            cands = [p for p in pool.values() if p["clip"] not in used and set(group) <= p["tags"]
-                     and (p["dur"] is None or p["dur"] >= need_s) and not ({"payoff"} & p["tags"] and kap < 4)
-                     and (slot == "finale" or "finale" not in p["tags"])]            # Schlussbild aufheben
+            cands = [p for p in pool.values() if frei(p) and set(group) <= p["tags"]
+                     and not ({"payoff"} & p["tags"] and 4 not in kaps)]
         if cands:
             # analysierte zuerst, dann Score, dann bekannter Moment
             cands.sort(key=lambda p: (p["clip"] in MEIDEN, -p["analysiert"], -p["score"], p["moment"] is None))
             return cands[0], group
     # kein Tag passt (z. B. neuer Ordner ohne Tags): bester freier Clip statt Lücke
-    rest = [p for p in pool.values() if p["clip"] not in used and (p["dur"] is None or p["dur"] >= need_s)
-            and (slot == "ramp" or "showpiece" not in p["tags"]) and not ({"payoff"} & p["tags"] and kap < 4)
-            and (slot == "finale" or "finale" not in p["tags"])]
+    rest = [p for p in pool.values() if frei(p) and not ({"payoff"} & p["tags"] and 4 not in kaps)]
     if rest:
         rest.sort(key=lambda p: (p["clip"] in MEIDEN, -p["analysiert"], -p["score"]))
         return rest[0], ["frei"]
@@ -125,6 +155,10 @@ def src_in(p, beats, per, hit_off_beats, speed_before=1.0, speed=1.0):
     """In-Punkt so wählen, dass der beste Moment auf dem Hit liegt. Vorrang: gesichteter Moment
     aus den Tags, dann Highlights der Clip-Analyse (nach Score), der erste, der ganz in den Clip passt."""
     need = beats * per * speed
+    if p.get("sauber"):                                 # sauberes Fenster aus tags.json: In-Punkt darin halten
+        lo, hi = p["sauber"]
+        s, peak = src_in(dict(p, sauber=None), beats, per, hit_off_beats, speed_before, speed)
+        return (round(min(max(s if s is not None else lo, lo), max(lo, hi - need)), 3), peak)
     peaks = ([p["moment"]] if p["moment"] is not None else []) + \
             [h["peak"] for h in sorted(p["highlights"], key=lambda h: -h.get("score", 0)) if h.get("peak") is not None]
     if not peaks:
@@ -143,40 +177,52 @@ def src_in(p, beats, per, hit_off_beats, speed_before=1.0, speed=1.0):
 def build(song, pool, fenster=1, start_takt=None, takte=None, auftakt=None):
     per = song["beat_period"]
     bars = [b["t"] for b in song["bars"]]
+    n_takte = takte or takte_regel2(per)
     if start_takt is not None:
-        b0, n_takte, auf = start_takt, takte or 16, auftakt or 0
+        b0, auf = start_takt, auftakt or 0
     else:
-        w = song["windows"][fenster - 1]
-        n_takte, auf = w["takte"], w["auftakt_beats"]
+        w = song["windows"][fenster - 1]           # Start des Fensters; Länge nach Regel 2 statt w["takte"]
+        auf = w["auftakt_beats"]
         b0 = int(round((w["start"] + auf * per - bars[0]) / (4 * per)))
     t0 = bars[b0] - auf * per
     beats_total = n_takte * 4 + auf
     amap = {a["hb"]: a for a in song["accent_map"]}
     k808 = song["onsets"]["kick808"]
-    vorlage = VORLAGE16 if n_takte >= 16 else VORLAGE8
-    kap_len = 16 if n_takte >= 16 else 8
-    slots = []
-    if auf:
-        slots.append((1, -auf, auf, "opener"))
-    for k in range(1, 5):
-        for off, bt, slot in vorlage[k]:
-            if k == 1 and off == 0 and not auf:
-                slot = "opener"
-            slots.append((k, (k - 1) * kap_len + off, bt, slot))
+    slots, kapitel, bo = [], [], 0                  # (Kapitel, Tag-Kapitel, Beat ab der Eins, Beats, Slot)
+    if n_takte <= 8:
+        for k in range(1, 5):
+            kapitel.append(dict(n=k, name=KAPITEL[k - 1], phrasen=0.5, start_s=round((bo + auf) * per, 3) if bo else 0.0))
+            for bt, slot in HALB[k][:n_takte // 2]:
+                slots.append((k, [k], bo, bt, slot))
+                bo += bt
+    else:
+        for k, kaps, n_ph in verteilung(n_takte // 4):
+            name = " & ".join(KAPITEL[i - 1].split(" & ")[0] for i in kaps) if len(kaps) > 1 else KAPITEL[k - 1]
+            kapitel.append(dict(n=k, name=name, phrasen=n_ph, start_s=round((bo + auf) * per, 3) if bo else 0.0))
+            art = f"k{k}"
+            folge = [art] + [art + "+"] * (n_ph - 1)
+            if k == 4:
+                folge.reverse()                     # letztes Kapitel: die Phrase mit dem Finale zuletzt
+            for f in folge:
+                for bt, slot in PHRASE[f]:
+                    slots.append((k, kaps, bo, bt, slot))
+                    bo += bt
+    if auf:                                         # Auftakt gehört zum ersten Shot (Opener)
+        k, kaps, _, bt, slot = slots[0]
+        slots[0] = (k, kaps, -auf, bt + auf, slot)
     used, shots = set(), []
-    n_flash = n_shake = n_ramp = 0
-    ramp_ohne_808 = []
-    for n, (k, bo, bt, slot) in enumerate(slots, 1):
-        mode = {"ramp": "ramp", "finale": "slow" if STIL["finale"]["zeitlupe"] else "normal"}.get(slot, "normal")
-        if mode == "ramp" and k == 3:
-            mode = "ramp_hold"
-        speed = 0.5 if mode == "slow" else 1.0
-        need = bt * per * (1.4 if mode.startswith("ramp") else speed) + 0.2
-        p, group = pick(pool, used, k, slot, need)
-        beat_abs = b0 * 4 + bo                              # Beat-Nummer ab Takt 0
+    n_flash = n_shake = 0
+    for n, (k, kaps, bo, bt, slot) in enumerate(slots, 1):
+        speed = TEMPO.get(slot, 1.0)
+        mode = "speed" if speed != 1.0 else "normal"
+        need = bt * per * speed + 0.2
+        p, group = pick(pool, used, kaps, slot, need)
+        beat_abs = b0 * 4 + bo                      # Beat-Nummer ab Takt 0
         hb = beat_abs * 2
         acc = amap.get(hb, {}).get("kind", "none")
         fx, fxp = [], {}
+        if speed != 1.0:
+            fx.append(f"Zeitlupe {speed:g}×".replace(".", ","))
         if acc in PUNCH:
             fx.append({"808": "Punch-in", "808_nachschlag": "Punch-in 0,12", "clap": "Mini-Punch"}[acc])
             fxp["punch"] = [[0, PUNCH[acc]]]
@@ -186,32 +232,21 @@ def build(song, pool, fenster=1, start_takt=None, takte=None, auftakt=None):
         inner = [o for o in k808 if beat_abs + 0.25 <= o["beat"] < beat_abs + bt - 0.01]
         inner.sort(key=lambda o: -o["strength"])
         for o in inner[:2]:
-            a = 0.05 if mode == "slow" else PUNCH["808_nachschlag"]
-            if mode.startswith("ramp") and abs(o["beat"] - (beat_abs + 2)) < 0.01:
-                continue
-            fxp.setdefault("punch", []).append([round(o["beat"] - beat_abs, 2), a])
+            fxp.setdefault("punch", []).append([round(o["beat"] - beat_abs, 2), 0.05 if speed < 1 else PUNCH["808_nachschlag"]])
             fx.append(f"Punch@{o['beat'] - beat_abs:g}")
-        hit_off = 1.0
-        if mode.startswith("ramp"):
-            n_ramp += 1
-            if amap.get(hb + 4, {}).get("kind") not in ("808", "808_nachschlag"):
-                ramp_ohne_808.append(n)
-            fx.append("Speed-Ramp" + (" (hold)" if mode == "ramp_hold" else "") + ", Hit@2 Punch 0,126")
-            fxp.setdefault("punch", []).append([2, 0.126])
-            hit_off = 2.8                                   # ~2,8 Beats Quelle bis zum Hit (1,0× -> 2,2×)
-        if slot == "finale":
-            fx += (["Zeitlupe 0,5×"] if mode == "slow" else []) + (["Push-in +12 %"] if STIL["finale"]["push"] else [])
-            if STIL["finale"]["push"]:
-                fxp["push"] = [1.0, 1.12]
-            hit_off = 1.0
-        if slot == "branding" and "push" not in fxp:
+        if slot == "finale" and STIL["finale"]["push"]:
+            fx.append("Push-in +12 %")
+            fxp["push"] = [1.0, 1.12]
+        if slot == "epic":
+            fx.append("Push-in +8 %")
+            fxp["push"] = [1.0, 1.08]
+        if slot in ("opener", "branding") and "push" not in fxp:
             fx.append("Push-in +6 %")
             fxp["push"] = [1.0, 1.06]
-        if p and "nah" in p["tags"] and slot in ("nah", "action") and "push" not in fxp:
+        if p and "nah" in p["tags"] and slot in ("nah", "durchgehend", "action") and "push" not in fxp:
             fx.append("Push-in +10 %")
             fxp["push"] = [1.0, 1.10]
-        if acc in ("808", "808_nachschlag") and n_flash < BUDGET["flashes"] and k == 4 and \
-                (slot == "finale" or bo == 3 * kap_len):
+        if acc in ("808", "808_nachschlag") and n_flash < BUDGET["flashes"] and k == 4 and slot in ("payoff", "finale"):
             fx.append("Flash")
             fxp["flash"] = [[0, 0.55]]
             n_flash += 1
@@ -222,50 +257,54 @@ def build(song, pool, fenster=1, start_takt=None, takte=None, auftakt=None):
         shot = dict(n=n, kapitel=k, kapitel_name=KAPITEL[k - 1], slot=slot, beat=bo + auf, beats=bt,
                     t=round(bo * per + auf * per, 4), song_t=round(t0 + (bo + auf) * per, 4),
                     takt=f"T{beat_abs // 4}.{beat_abs % 4 + 1}", akzent=acc, mode=mode, fx=fx, fxp=fxp)
+        if mode == "speed":
+            shot["speed"] = speed
         if p:
             used.add(p["clip"])
-            s, peak = src_in(p, bt, per, hit_off, speed=speed)
+            s, peak = src_in(p, bt, per, 1.0, speed_before=speed, speed=speed)
             shot.update(clip=p["clip"], src=s, peak=peak, desc=p["desc"], passt=" + ".join(group),
                         analysiert=p["analysiert"])
+            if slot == "highlight" and "explosiv" in p["tags"]:
+                shot["hinweis"] = "Ramp möglich (Regel 8: ramp_hold, Hit auf einem 808 in HITS, Landung im Bild)"
         else:
             shot.update(clip=None, src=None, peak=None, desc=f"FEHLT: Clip für '{slot}'", passt="", analysiert=False)
         shots.append(shot)
-    # Checkliste (Budget aus stil.json)
-    short = [s["n"] for s in shots if s["beats"] < BUDGET["min_beats"]]
+    assert sum(s["beats"] for s in shots) == beats_total, "Slots decken das Reel nicht ab"
+    # Checkliste Stil-Leitfaden Abschnitt 9
     checks = {
-        "segmente": len(shots) + sum(1 for s in shots if s["mode"].startswith("ramp")),
-        "ramps": n_ramp, "flashes": n_flash, "shakes": n_shake, "ramp_hit_ohne_808": ramp_ohne_808,
-        "szenen_unter_2_beats": short,
+        "szenen": len(shots), "flashes": n_flash, "shakes": n_shake,
+        "szenen_unter_4_beats": [s["n"] for s in shots if s["beats"] < 4],
         "clips_doppelt": len(used) != len([s for s in shots if s["clip"]]),
         "fehlende_clips": [s["n"] for s in shots if not s["clip"]],
         "finale_beats": shots[-1]["beats"],
         "ohne_analyse": [s["clip"] for s in shots if s["clip"] and not s["analysiert"]],
     }
     return dict(song=song["file"], per=per, bpm=song["bpm"], song_start=round(t0, 4), takte=n_takte, auftakt=auf,
-                beats=beats_total, dauer=round(beats_total * per, 4), start_takt=b0,
-                kapitel=[dict(n=k, name=KAPITEL[k - 1], start_s=round(((k - 1) * kap_len + auf) * per, 3) if k > 1 else 0.0)
-                         for k in range(1, 5)],
+                beats=beats_total, dauer=round(beats_total * per, 4), start_takt=b0, kapitel=kapitel,
                 checks=checks, shots=shots)
 
 
 def write_md(E, out):
     L = [f"# Shotlisten-Vorschlag ({E['takte']} Takte{' + Auftakt' if E['auftakt'] else ''}, {E['dauer']:.2f} s)", "",
          f"Song ab {E['song_start']:.3f} s (T{E['start_takt']}.1{' minus 2 Beats Auftakt' if E['auftakt'] else ''}), "
-         f"{E['bpm']:.2f} BPM, {E['beats']} Beats. Entwurf: In-Punkte an dichten Frames prüfen.", "",
+         f"{E['bpm']:.2f} BPM, {E['beats']} Beats. Entwurf: Szenenlänge nach der ganzen Aktion anpassen, "
+         f"In-Punkte an dichten Frames prüfen.", "",
+         "Kapitel: " + ", ".join(f"{k['name']} ab {k['start_s']:.1f} s ({k['phrasen']:g} Phrase{'n' if k['phrasen'] != 1 else ''})"
+                                 for k in E["kapitel"]), "",
          "| # | Zeit | Takt | Beats | Kapitel | Clip | In (s) | Modus | Akzent | Effekte | Inhalt |",
          "|---|---|---|---|---|---|---|---|---|---|---|"]
     for s in E["shots"]:
         L.append(f"| {s['n']} | {s['t']:.2f} | {s['takt']} | {s['beats']} | {s['kapitel']} | {s['clip'] or '–'} | "
-                 f"{'offen' if s['src'] is None else s['src']} | {s['mode']} | {s['akzent']} | {', '.join(s['fx'])} | {s['desc']} |")
+                 f"{'offen' if s['src'] is None else s['src']} | {s['mode']} | {s['akzent']} | {', '.join(s['fx'])} | "
+                 f"{s['desc']}{' (' + s['hinweis'] + ')' if s.get('hinweis') else ''} |")
     c = E["checks"]
     L += ["", "## Checkliste", "",
-          f"- Segmente (Ramps zählen doppelt): {c['segmente']} (Richtwert {BUDGET['segmente_16'][0]}–"
-          f"{BUDGET['segmente_16'][1]} pro 16 Takte)",
-          f"- Ramp-Hit ohne 808 (Shot verschieben): {c['ramp_hit_ohne_808'] or 'keiner'}",
-          f"- Ramps {c['ramps']} (max. {BUDGET['ramps']}), Flashes {c['flashes']} (max. {BUDGET['flashes']}), "
-          f"Shakes {c['shakes']} (max. {BUDGET['shakes']}, nur auf Schlägen)",
-          f"- Szenen unter {BUDGET['min_beats']} Beats: {c['szenen_unter_2_beats'] or 'keine'}; "
-          f"Finale {c['finale_beats']} Beats",
+          f"- Länge {E['dauer']:.1f} s (Regel 2: ab {STIL['laenge_s'][0]} s, bis ~{STIL['laenge_s'][1]} s); "
+          f"{c['szenen']} Szenen (kein Richtwert)",
+          f"- Szenen unter 4 Beats (nur durchgehende Bewegung oder kurze Reaktion): "
+          f"{c['szenen_unter_4_beats'] or 'keine'}; Finale {c['finale_beats']} Beats",
+          f"- Flashes {c['flashes']} (max. {BUDGET['flashes']}), Shakes {c['shakes']} (max. {BUDGET['shakes']}, nur auf "
+          f"Schlägen), Ramps keine (Regel 8: nur von Hand)",
           f"- Fehlende Clips: {c['fehlende_clips'] or 'keine'}; ohne Clip-Analyse (In-Punkt geschätzt): "
           f"{', '.join(c['ohne_analyse']) or 'keine'}"]
     Path(out).write_text("\n".join(L) + "\n")
@@ -275,15 +314,17 @@ def main():
     ap = argparse.ArgumentParser(description="Shotlisten-Vorschlag nach Stil-Leitfaden")
     ap.add_argument("--song", required=True, help="song.json von song_analyse.py")
     ap.add_argument("--clips", help="clips.json von clip_analyse.py")
-    ap.add_argument("--tags", help="Tags je Clip (Format: tags_beispiel.json)")
+    ap.add_argument("--tags", help="Tags je Clip (z. B. <reel>/schnitt/tags.json, Format: tags_beispiel.json)")
     ap.add_argument("--fenster", type=int, default=1, help="Reel-Fenster aus song.json (1 = Empfehlung)")
-    ap.add_argument("--start-takt", type=int)
-    ap.add_argument("--takte", type=int)
+    ap.add_argument("--start-takt", type=int, help="Takt laut song.md, auf dessen Eins das Reel beginnt")
+    ap.add_argument("--takte", type=int, help="Vielfaches von 4; ohne: Länge nach Regel 2 (stil.json laenge_s)")
     ap.add_argument("--auftakt", type=int, default=0, help="Beats Auftakt vor der Eins (0 oder 2)")
     ap.add_argument("--meiden", help="Clips einer anderen Variante meiden: edl.json/shotliste.json oder Kürzel "
                                      "mit Komma (z. B. für Variante B: --meiden reel/schnitt/A/edl.json)")
     ap.add_argument("-o", "--out", default=".")
     a = ap.parse_args()
+    if a.takte is not None and (a.takte % 4 or a.takte < 8):
+        ap.error("--takte: Vielfaches von 4, mindestens 8 (Regel 2: volle 4-Takt-Phrasen)")
     for m in (a.meiden or "").split(","):
         if m.strip().endswith(".json"):
             for sh_ in json.loads(Path(m.strip()).read_text())["shots"]:

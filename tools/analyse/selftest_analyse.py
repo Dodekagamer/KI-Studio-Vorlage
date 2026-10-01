@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Kleiner Test der Analyse-Werkzeuge (~20 s), wird von ../selftest.py aufgerufen.
+"""Kleiner Test der Analyse-Werkzeuge (~25 s), wird von ../selftest.py aufgerufen.
 Einzeln: python3 selftest_analyse.py"""
 import json
 import subprocess
@@ -64,9 +64,13 @@ def main():
     tags = {"1": {"kapitel": [1], "tags": ["opener", "gruppe", "branding"]}, "2": {"kapitel": [2], "tags": ["action"]},
             "3": {"kapitel": [3], "tags": ["schlag", "action"]}, "4": {"kapitel": [4], "tags": ["finale", "gruppe"]}}
     (d / "tags.json").write_text(json.dumps(tags))
-    E = sl.build(A, sl.load_pool(None, d / "tags.json"), start_takt=0, takte=16, auftakt=0)
-    assert [s["kapitel"] for s in E["shots"]][0] == 1 and E["shots"][-1]["mode"] == "slow"
-    assert abs(E["dauer"] - 64 * per) < 0.01 and not E["checks"]["szenen_unter_2_beats"]
+    E = sl.build(A, sl.load_pool(None, d / "tags.json"), start_takt=0, auftakt=0)   # Länge nach Regel 2
+    fin = E["shots"][-1]
+    assert E["takte"] == 20 and abs(E["dauer"] - 80 * per) < 0.01, (E["takte"], E["dauer"])   # 140 BPM: 20 Takte
+    assert E["shots"][0]["speed"] == 0.75 and fin["beats"] == 8 and fin["speed"] == 0.5, (E["shots"][0], fin)
+    assert all(s["beats"] >= 2 and s["mode"] in ("normal", "speed") for s in E["shots"])   # nie Ramp, nie Zeitraffer
+    starts = [s["beat"] for i, s in enumerate(E["shots"]) if i and s["kapitel"] != E["shots"][i - 1]["kapitel"]]
+    assert all(b % 16 == 0 for b in starts), starts                                          # Kapitel auf Phrasen
     print(f"OK   shotliste: {len(E['shots'])} Shots, 4 Kapitel, Finale {E['shots'][-1]['beats']} Beats")
     from clip_analyse import analyse_clip
     f = d / "t.mp4"
@@ -86,6 +90,22 @@ def main():
     st = {c["check"]: c["status"] for c in r["checks"]}
     assert st["Auflösung"] == "FEHLER" and r["exit_code"] == 1 and (d / "qc" / "qc.md").exists(), st
     print(f"OK   reel_qc: {len(r['checks'])} Prüfungen, falsche Auflösung erkannt")
+    import oton
+    ref = np.load(oton.MODELL / "pruefung.npy")                # YAMNet in TensorFlow, 28.09.2026
+    p = oton.hoeren(oton.pruefsignal())
+    assert p.shape == ref.shape and np.abs(p - ref).max() < 1e-3, (p.shape, float(np.abs(p - ref).max()))
+    a = d / "ton"
+    a.mkdir()
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "sine=f=330:d=3:sample_rate=48000",
+                    str(a / "IMG_0001.flac")], check=True)
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=s=320x240:r=30:d=1", "-c:v",
+                    "libx264", "-pix_fmt", "yuv420p", str(a / "IMG_0002.mp4")], check=True)
+    r = subprocess.run([sys.executable, str(HERE / "oton.py"), str(a), "-o", str(d / "oton")], capture_output=True,
+                       text=True)
+    o = json.load(open(d / "oton" / "oton.json"))["clips"]
+    assert r.returncode == 0 and [c["name"] for c in o] == ["IMG_0001", "IMG_0002"] and o[1].get("kein_ton") \
+        and len(o[0]["zeit"]) == 6 and "IMG_0002 | kein Ton" in (d / "oton" / "oton.md").read_text(), r.stdout + r.stderr
+    print(f"OK   oton: YAMNet wie TensorFlow (Abweichung {np.abs(p - ref).max():.0e}), oton.md/json, Clip ohne Ton erkannt")
     subprocess.run(["rm", "-rf", str(d)])
 
 

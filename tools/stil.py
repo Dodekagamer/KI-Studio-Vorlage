@@ -22,14 +22,26 @@ GRUNDSTIL = {
     "look": "clean",         # Look aus tools/vfx/looks.py, Pfad zu einer .cube, Parameter-Objekt oder null
     "vignette": 0.12,        # Randabdunklung 0–0,25 (0 = aus)
     "kapitel": ["Einstieg", "Aufbau", "Höhepunkt", "Finale"],
-    "budget": {"ramps": 3, "flashes": 2, "shakes": 2, "uebergaenge": 2, "min_beats": 2, "segmente_16": [24, 30]},
+    "laenge_s": [30, 40],    # volle 4-Takt-Phrasen: mindestens [0] Sekunden, bis [1], wenn ganze Aktionen sonst fehlen
+    "budget": {"ramps": 2, "flashes": 2, "shakes": 2, "uebergaenge": 4, "min_beats": 2, "aktion_beats": 4,
+               "segmente_16": [16, 24]},   # segmente_16 nur Info: die Szenenlänge folgt der ganzen Aktion
     "punch": {"808": 0.14, "nachschlag": 0.12, "clap": 0.06},
-    "finale": {"beats": 4, "zeitlupe": True, "push": True},
+    "finale": {"beats": 8, "zeitlupe": True, "push": True},
+    "einstieg_im_video": True,   # Reel beginnt mit echtem Moment und O-Ton, Song gedämpft bis zum Drop (edl.py EINSTIEG)
+    "epic_opener": False,    # True: Epic-Shot (Gruppe in starker Pose, 0,5×) unter den ersten 4 Shots verlangen
+    "stichwoerter": {        # Regex auf die Shot-Beschreibung (edlcheck.py): was 2 Beats, Ramps, Shake darf
+        "durchgehend": r"Seilspring|\bSprint|\bLäuf|\bLauf\b|\blaufen|Tanz|Battle Ropes|Reaktion|Erschöpf|Jubel|\bLach|Grins",
+        "explosiv": r"Salto|Flip|Box-Jump|\bSprung(?![-\w])|\bJump\b",
+        "schlag": r"Box(?!-Jump)|Sandsack|Pratze|Sparring|Kick|Schlag|Treffer|Aufprall",
+    },
     "erlaubt": [],           # Extras ohne Einzelwunsch: "text", "sfx", "split", "glitch", "freeze", "whip", "echo" …
     "varianten": [
-        {"x": "A", "name": "Story", "idee": "Stil-Leitfaden 1:1", "kurz": "Hook, 16 Takte, Story in 4 Kapiteln"},
-        {"x": "B", "name": "Power", "idee": "andere Songstelle, andere Clips", "kurz": "andere Songstelle, andere Clips"},
-        {"x": "C", "name": "Clean", "idee": "kürzer und ruhiger", "kurz": "kürzer und ruhiger"},
+        {"x": "A", "name": "Story", "idee": "Stil-Leitfaden 1:1: Einstieg im Video, Drop auf der Hook, Szenen mit Jump Cuts",
+         "kurz": "Einstieg im Video, Drop auf der Hook, Szenen mit Jump Cuts in 4 Kapiteln"},
+        {"x": "B", "name": "Power", "idee": "andere Songstelle, andere Clips, kurze Szenen, meiste Punches",
+         "kurz": "andere Songstelle, kurzer Einstieg, kurze Szenen mit vielen Jump Cuts"},
+        {"x": "C", "name": "Musikvideo", "idee": "langer Einstieg, lange Szenen, Überblendungen, O-Ton",
+         "kurz": "langer Einstieg, lange Szenen, Überblendungen an ruhigen Stellen"},
     ],
 }
 
@@ -71,8 +83,9 @@ def main():
     print(f"  Marke: {s['marke'] or '–'} · Nutzer: {s['nutzer'] or '–'} · Inhalt: {s['inhalt'] or '–'}")
     print(f"  Look: {look_name()} · Vignette {s['vignette']:.0%} · Kapitel: {', '.join(s['kapitel'])}")
     b = s["budget"]
-    print(f"  Budget: {b['ramps']} Ramps, {b['flashes']} Flashes, {b['shakes']} Shakes, {b['uebergaenge']} Übergänge, "
-          f"Szenen ab {b['min_beats']} Beats, {b['segmente_16'][0]}–{b['segmente_16'][1]} Segmente pro 16 Takte")
+    print(f"  Länge {s['laenge_s'][0]}–{s['laenge_s'][1]} s · Budget: {b['ramps']} Ramps, {b['flashes']} Flashes, "
+          f"{b['shakes']} Shakes, {b['uebergaenge']} Überblendungen, Teile ab {b['min_beats']} Beats, "
+          f"Aktionen ab {b['aktion_beats']} Beats · Einstieg im Video: {'ja' if s['einstieg_im_video'] else 'nein'}")
     print(f"  Extras ohne Einzelwunsch: {', '.join(s['erlaubt']) or 'keine'} · "
           f"Varianten: {', '.join(v['x'] + ' ' + v['name'] for v in s['varianten'])}")
     fehlt = [k for k in ("marke", "nutzer", "inhalt") if not s[k]]

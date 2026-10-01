@@ -44,6 +44,10 @@ def events(sh):
         ev["Speed-Ramp"] = [2.0]
     if sh["mode"] == "freeze":
         ev["Freeze-Frame"] = [sh["freeze_at"]]
+    if sh.get("jump"):
+        ev["Jump Cut"] = [0.0]
+    if sh.get("ueber") == "blende":
+        ev["Blende"] = [0.0]
     return {k: v for k, v in ev.items() if v}
 
 

@@ -43,6 +43,17 @@ def main():
         ok(f"{v.split(' Copyright')[0]}, OpenCV {cv2.__version__}, librosa {librosa.__version__}, "
            f"rubberband {'da' if shutil.which('rubberband') else 'FEHLT'}")
 
+        # Syntax aller Werkzeuge: im geteilten Projektordner fällt ein halb gespeicherter Edit sonst erst im langen Lauf auf
+        import ast
+        skripte, kaputt = sorted(Path(__file__).resolve().parent.rglob("*.py")), []
+        for f in skripte:
+            try:
+                ast.parse(f.read_text(), str(f))
+            except SyntaxError as e:
+                kaputt.append(f"{f.name} Zeile {e.lineno}: {e.msg}")
+        assert not kaputt, "Syntaxfehler in " + "; ".join(kaputt)
+        ok(f"Syntax aller {len(skripte)} Werkzeug-Skripte")
+
         sys.path.insert(0, str(TOOLS / "vfx"))
         import looks
         import stil

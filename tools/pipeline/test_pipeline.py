@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
-"""Ende-zu-Ende-Test der Pipeline mit synthetischen Clips (~1 min, braucht kein Drive).
+"""Ende-zu-Ende-Test der Pipeline mit synthetischen Clips (~6 min, braucht kein Drive).
 
     python3 <projekt>/tools/pipeline/test_pipeline.py
 
-Baut 3 Testclips (HLG 1080p 30 fps, 1440×2560 60 fps, Querformat 1920×1080 30 fps), ein iPhone-Foto (HEIC mit
-EXIF-Zeit) und einen 140-BPM-Song mit 808-Hits, dann: ingest -> extract -> render master -> storyboard (Keyframes +
-Render) -> reel_audio mix -> export -> vorschau -> verify, danach varianten.py mit zwei kurzen Varianten (Bauen,
-Unterschied-Check, Wahl mit Export und Aufräumen). Deckt die Modi normal, ramp, split (mit Öffnung), speed 0,5×,
-das Foto als Standbild mit Push-in und die Effekte push, punch, Mini-Punch, shake, flash ab.
+Baut 5 Testclips (HLG 1080p 30 fps, 1440×2560 60 fps, Querformat 1920×1080 30 fps, zwei Hochkant-Clips; drei
+davon mit Ton), ein iPhone-Foto (HEIC mit EXIF-Zeit) und einen 140-BPM-Song mit 808-Hits, dann: ingest -> extract ->
+render master -> storyboard (Keyframes + Render) -> reel_audio mix -> export -> vorschau -> verify, danach
+varianten.py mit zwei kurzen Varianten (Bauen, Unterschied-Check, Wahl mit Export und Aufräumen) und zuletzt die
+Stil-Leitfaden mit der echten Vorlage reels/_vorlage/schnitt/edl.py: Einstieg im Video, Szene mit
+Jump Cut, Überblendung, O-Ton leise und als Moment, Ausklang (tonspur.py, edlcheck.py, reel_audio music_fx/oton,
+render.py ueber, verify.py). Deckt die Modi normal, ramp, split (mit Öffnung), speed 0,5×, das Foto als Standbild
+mit Push-in und die Effekte push, punch, Mini-Punch, shake, flash ab. Die Wahl läuft mit --plattform instagram,youtube und prüft beide Fassungen (verify.py, YouTube
+−14 LUFS). Weitere Tests: test_plattform.py, test_drive.py, test_interview.py.
 Arbeitet in einem Temp-Ordner, fasst nichts im Projekt an.
 """
 import json
@@ -32,8 +36,11 @@ def sh(*cmd, env=None):
     return r.stdout
 
 
-def make_clip(path, w, h, fps, dur, extra=()):
-    sh("ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", f"testsrc2=size={w}x{h}:rate={fps}:duration={dur}",
+def make_clip(path, w, h, fps, dur, extra=(), ton=False):
+    """Testbild; ton=True: Stereo-Ton wie Stimmen (330/520 Hz, im Silbentakt moduliert, nichts unter 120 Hz)."""
+    a = ["-f", "lavfi", "-i", f"aevalsrc='0.2*sin(2*PI*330*t)*(0.5+0.5*sin(2*PI*4*t))|0.2*sin(2*PI*520*t)"
+                              f"*(0.5+0.5*sin(2*PI*3*t))':s=48000:d={dur}", "-c:a", "aac", "-shortest"] if ton else []
+    sh("ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", f"testsrc2=size={w}x{h}:rate={fps}:duration={dur}", *a,
        "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", *extra, path)
 
 
@@ -70,9 +77,11 @@ def main():
     clips = work / "clips"
     clips.mkdir()
     make_clip(clips / "IMG_0001.MOV", 1080, 1920, 30, 5,
-              ["-color_primaries", "bt2020", "-color_trc", "arib-std-b67", "-colorspace", "bt2020nc"])
+              ["-color_primaries", "bt2020", "-color_trc", "arib-std-b67", "-colorspace", "bt2020nc"], ton=True)
     make_clip(clips / "IMG_0002.MOV", 1440, 2560, 60, 6)
-    make_clip(clips / "IMG_0003.MOV", 1920, 1080, 30, 5)
+    make_clip(clips / "IMG_0003.MOV", 1920, 1080, 30, 5, ton=True)
+    make_clip(clips / "IMG_0005.MOV", 1080, 1920, 30, 4, ton=True)
+    make_clip(clips / "IMG_0006.MOV", 1080, 1920, 30, 4, ton=True)
     sys.path.insert(0, str(PIPE))
     sys.dont_write_bytecode = True                          # kein __pycache__ im geteilten Projektordner
     from reelcfg import _heif_opener
@@ -103,18 +112,23 @@ def main():
     (work / "edl.json").write_text(json.dumps(E, ensure_ascii=False))
     env = dict(os.environ, REEL_WORK=str(work), REEL_EDL=str(work / "edl.json"), PYTHONPATH=str(PIPE))
     py = sys.executable
-    sh(py, PIPE / "ingest.py", "--keep", env=env)
+    out = sh(py, PIPE / "ingest.py", "--keep", env=env)
+    assert "QUERFORMAT 1 Clip(s): IMG_0003" in out and "FEHLT" not in out, out   # nur der Querformat-Testclip wird gemeldet
     metas = sorted((work / "meta").glob("*.json"))
     m1 = json.load(open(work / "meta" / "IMG_0001.json"))
     m4 = json.load(open(work / "meta" / "IMG_0004.json"))
-    assert len(metas) == 4 and m1["trc"] == "arib-std-b67" and m1["kf_times"], "ingest"
+    assert len(metas) == 6 and m1["trc"] == "arib-std-b67" and m1["kf_times"], "ingest"
     assert m4.get("photo") and (m4["w"], m4["h"]) == (1200, 1600) and m4["ctime"] == "2026-09-20T13:42:25", m4
-    print(f"OK   ingest: 3 Clips + HEIC-Foto, HLG erkannt, Keyframes, Aufnahmezeit ({time.time() - t0:.0f} s)")
+    ton = sorted(p.stem for p in (work / "audio").glob("*.flac"))
+    assert ton == ["IMG_0001", "IMG_0003", "IMG_0005", "IMG_0006"] and m1["ton"], ton
+    print(f"OK   ingest: 5 Clips + HEIC-Foto, HLG erkannt, Keyframes, Aufnahmezeit, Ton je Clip, Querformat gemeldet ({time.time() - t0:.0f} s)")
     out = sh(py, PIPE / "extract.py", env=env)
-    assert "WARNUNG" not in out and len(list((work / "frames").glob("*/times.json"))) == 4, out
+    warn = [z for z in out.splitlines() if "WARNUNG" in z]
+    assert len(warn) == 1 and warn[0].startswith("0003:") and "Querformat 1920×1080" in warn[0], out   # nur der Querformat-Clip
+    assert len(list((work / "frames").glob("*/times.json"))) == 4, out
     w2 = json.load(open(work / "frames" / "0002" / "times.json"))["w"]
     assert w2 == 1440, w2
-    print(f"OK   extract: Frames je Clip vollständig, 1440er-Quelle erkannt, Foto ({time.time() - t0:.0f} s)")
+    print(f"OK   extract: Frames je Clip vollständig, 1440er-Quelle erkannt, Foto, Querformat gewarnt ({time.time() - t0:.0f} s)")
     master = work / "test_master.mp4"
     sh(py, PIPE / "render.py", "master", master, env=env)
     n = int(sh("ffprobe", "-v", "error", "-count_frames", "-select_streams", "v:0", "-show_entries",
@@ -151,6 +165,7 @@ def main():
     assert frozen_ok, lines
     print(f"OK   verify: Schnitte, 808-Versatz, Ende, Pegel ({time.time() - t0:.0f} s)")
     varianten_test(work, env, t0)
+    stil4_test(work, env, t0)
     print(f"Pipeline-Test grün in {time.time() - t0:.0f} s. Dateien: {work}")
 
 
@@ -194,6 +209,90 @@ def varianten_test(work, env, t0):
                        text=True, env=env)
     assert r.returncode == 0 and (reel / "test_v2_mit_song.mp4").exists(), r.stdout + r.stderr
     print(f"OK   varianten --wahl A --fassung v2: Folgefassung als test_v2_… ({time.time() - t0:.0f} s)")
+    r = subprocess.run([py, PIPE / "varianten.py", reel, "--wahl", "A", "--fassung", "v3", "--plattform",
+                        "instagram,youtube"], capture_output=True, text=True, env=env)
+    assert r.returncode == 0 and r.stdout.count("Ergebnis: alles OK") == 2, r.stdout + r.stderr
+    for f in ("test_v3_mit_song.mp4", "test_v3_yt_mit_song.mp4", "test_v3_yt_ohne_ton.mp4", "test_v3_yt_titelbild.jpg"):
+        assert (reel / f).exists(), f
+    c = subprocess.run([py, PIPE / "plattform.py", "check", reel / "test_v3_yt_mit_song.mp4", "--streng"],
+                       capture_output=True, text=True)
+    import re
+    lu = re.search(r"Lautheit (-?\d+\.\d) LUFS", c.stdout)
+    assert c.returncode == 0 and lu and abs(float(lu.group(1)) + 14) <= 0.5, c.stdout + c.stderr
+    print(f"OK   varianten --wahl A --plattform instagram,youtube: beide Dateisätze, YouTube {lu.group(1)} LUFS "
+          f"({time.time() - t0:.0f} s)")
+
+
+STIL4 = """# ---- pro Reel anpassen (Test Einstieg, Jump Cut, O-Ton) ----
+TITEL, VARIANTE, VARIANTE_NAME, UNTERSCHIED = "stil4", "C", "Musikvideo", "Test Einstieg, Jump Cut, O-Ton"
+UNTERTITEL = "Variante C · Musikvideo"
+SONG, SONG_DATEI = "Testsong", "{song}"
+START_TAKT, AUFTAKT, TAKTE, EINSTIEG, EINSTIEG_AUF, AUSKLANG, DECODER_VERSATZ = 1, 4, 4, 4, 0.03, 4, 0.0
+EINSTIEG_SONG = "gedämpft"
+HITS = [4, 8, 16]
+K1, K4 = "EINSTIEG", "FINALE"
+s(4, K1, "0005", 0.5, "normal", [], "Einstieg im Video: Leute reden", oton="vorn")
+s(4, K1, "0002", 0.5, "speed", ["Zeitlupe", "Push-in", "Punch-in"], "Epic-Shot auf dem Drop",
+  dict(push=[1.0, 1.06], punch=[[0, 0.14]]), speed=0.5)
+s(2, K1, "0001", 0.2, "normal", [], "Seilspringen, Teil 1", oton="leise")
+j(2, "0001", 2.6, "normal", [], "Seilspringen, Teil 2", oton="leise")
+s(4, K4, "0003", 1.0, "normal", ["Push-in"], "Gruppe feuert an", dict(push=[1.0, 1.05]), oton="vorn", ueber="blende")
+s(4, K4, "0004", 0.0, "speed", ["Push-in"], "Finale: Foto mit Push-in", dict(push=[1.0, 1.1]), speed=0.5)
+s(4, K4, "0006", 0.5, "normal", [], "Ausklang: echter Ton", oton="vorn")
+"""
+
+
+def stil4_test(work, env, t0):
+    """Echte Vorlage: Einstieg im Video, Jump Cut, Überblendung, O-Ton-Moment, Ausklang."""
+    reel = work / "reels" / "2026-01-02_stil4"
+    d = reel / "schnitt" / "C"
+    d.mkdir(parents=True)
+    (work / "tools").symlink_to(PIPE.parent)             # edl.py sucht tools/pipeline in den Elternordnern
+    (reel / "schnitt" / "grid.json").write_text(json.dumps(dict(per=PER, ph=0.0, erste_eins=0.0)))
+    vorlage = (PIPE.parent.parent / "reels" / "_vorlage" / "schnitt" / "edl.py").read_text()
+    a = vorlage.index("# ---- pro Reel anpassen")
+    b = vorlage.index("\n# ------", a) + 1
+    (d / "edl.py").write_text(vorlage[:a] + STIL4.format(song=work / "song4.wav") + vorlage[b:])
+    make_song(work / "song4.wav", 26 * PER, [4, 8, 16, 20])
+    py = sys.executable
+    out = sh(py, d / "edl.py", env=env)
+    E, spec = json.load(open(d / "edl.json")), json.load(open(d / "audio_spec.json"))
+    assert "7 Shots in 6 Szenen" in out and not any(k in out for k in ("Jump Cut Shot", "Überblendung", "O-Ton-Moment",
+                                                                          "Drop auf", "Ausklang", "Opener", "Finale")), out
+    assert E["shots"][3]["jump"] and E["shots"][3]["szene"] == E["shots"][2]["szene"], E["shots"][3]
+    assert abs(spec["music"][0]["dur"] - 20 * PER) < 1e-3 and abs(spec["duration"] - 24 * PER) < 1e-3, spec["music"]
+    fx = spec["music_fx"]
+    assert len(fx) == 2 and fx[0]["to"] == round(4 * PER, 4) and fx[1]["from"] == round(12 * PER, 4), fx
+    assert len(spec["oton"]) == 5 and spec["oton"][1]["fade_out"] == 0.03 and spec["oton"][2]["fade_out"] > 0.39, \
+        spec["oton"]
+    import edlcheck
+    import tonspur
+    E2 = dict(E, einstieg_song="aus")                    # Einstieg nur mit echtem Ton, Song ab dem Drop
+    m2, fx2 = tonspur.audio_spec(E2, "song.wav", 1.0)["music"][0], tonspur.audio_spec(E2, "song.wav", 1.0)["music_fx"]
+    assert m2["at"] == round(4 * PER, 4) and m2["src"] == round(1.0 + 4 * PER, 4) and abs(m2["dur"] - 16 * PER) < 1e-3 \
+        and len(fx2) == 1 and fx2[0].get("moment"), (m2, fx2)
+    assert not any("Einstieg" in x for x in edlcheck.pruefen(E2)), edlcheck.pruefen(E2)
+    E3 = dict(E2, shots=[dict(E["shots"][0], oton=None)] + E["shots"][1:])
+    assert any("stumm bis zum Drop" in x for x in edlcheck.pruefen(E3)), edlcheck.pruefen(E3)
+    print(f"OK   Stil 4: Vorlage mit Einstieg (gedämpft und aus), Jump Cut, Blende, O-Ton, Ausklang -> edl/audio_spec, "
+          f"Prüfung ohne Stil-Warnung ({time.time() - t0:.0f} s)")
+    out = sh(py, PIPE / "varianten.py", reel, "--loop", "4", env=env)
+    mix = (work / "mix_C.log").read_text()
+    assert mix.count("O-Ton ") == 5 and "weggelassen" not in mix and "Musik 0.00-1.71 s" in mix, mix
+    assert (reel / "stil4_C_vorschau.mp4").exists() and (reel / "stil4_C_storyboard.jpg").exists(), out
+    import scipy.signal as ss
+    x = __import__("reel_audio").decode(work / "mix_C.wav").mean(1)
+    hi = ss.sosfiltfilt(ss.butter(4, 5000, btype="highpass", fs=48000, output="sos"), x)
+    rms = lambda y, a_, b_: 20 * np.log10(np.sqrt(np.mean(y[int(a_ * PER * 48000):int(b_ * PER * 48000)] ** 2)) + 1e-9)
+    ein, voll, aus = rms(hi, 0.5, 3.5), rms(hi, 4.5, 7.5), rms(hi, 20.5, 23.5)   # Hi-Hats über 5 kHz
+    assert ein < voll - 10 and aus < voll - 30 and rms(x, 20.5, 23.5) > -40, (ein, voll, aus, rms(x, 20.5, 23.5))
+    print(f"OK   Stil 4: gebaut; Höhen im Einstieg {ein - voll:.0f} dB unter dem Drop, Ausklang nur O-Ton "
+          f"({time.time() - t0:.0f} s)")
+    r = subprocess.run([py, PIPE / "varianten.py", reel, "--wahl", "C", "--titel", "20"], capture_output=True,
+                       text=True, env=env)
+    assert r.returncode == 0 and "alles OK" in r.stdout and "1 Überblendung(en)" in r.stdout, r.stdout + r.stderr
+    print(f"OK   Stil 4 --wahl C: verify mit Jump Cut, Überblendung, Einstieg und Ausklang alles OK "
+          f"({time.time() - t0:.0f} s)")
 
 
 if __name__ == "__main__":

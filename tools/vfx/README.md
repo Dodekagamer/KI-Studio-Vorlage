@@ -9,6 +9,7 @@ eine dezente Standardstärke; `check` warnt, wenn eine spec über das Effekt-Bud
 | `reelvfx.py` | Bibliothek + Renderer + Kommandozeile (`list`, `check`, `render`, `stills`, `cuts`, `stabilize`, `slowmo`, `safezones`) |
 | `looks.py` | 7 Looks als 33³-LUT, dazu eigene Looks per Parameter oder `.cube` (Stil in `stil.json`, Feld `look`) |
 | `luts/*.cube` | gebackene Looks, anwenden mit `lut3d=…:interp=tetrahedral` |
+| `untertitel.py` | Untertitel Wort für Wort als ASS-Datei (Interview-Reels und Dialog-Szenen): Antonio Bold, Großbuchstaben 96 px, einheitlich weiß ohne Rand mit weichem dunklem Schein, 1–3 Wörter gleichmäßig verteilt, Pop-Animation; Fragen hinter der Kamera oben (54 px) mit Ausblendung. Stil-Leitfaden Abschnitt 10, Aufruf im Kopf der Datei. |
 | `gallery.py` | baut eine Vorschau-Galerie am eigenen Reel (`python3 gallery.py <reel>_ohne_ton.mp4 [ordner]`): Demo pro Effekt (`NN_name.mp4`), alle in einem Video (`vfx_galerie_alle.mp4`), Übersicht (`galerie_uebersicht.jpg`). Gut nach dem ersten fertigen Reel, damit der Nutzer Effekte am eigenen Material sieht. |
 | `beispiele/` | drei specs: Akzente auf einem fertigen Schnitt, direkt aus Rohmaterial, Intro mit Text |
 
@@ -44,9 +45,10 @@ python3 reelvfx.py stills spec.json /tmp/stills 1.2 3.4   # Standbilder zum Prü
 
 ## Budget (`stil.json`)
 
-`check` und `render` warnen, wenn Flashes, Shakes, Speed-Ramps oder Übergangseffekte über dem Budget in `stil.json` liegen, und
-bei allem, was nur auf ausdrücklichen Wunsch kommt (Glitch, Split, Freeze, Whip, Echo, Text …). Was der Nutzer für ein Reel
-ausdrücklich will, kommt in die spec als `"erlaubt": ["text", "split", "whip"]`; was immer erlaubt ist, in `stil.json` unter `erlaubt`.
+`check` und `render` warnen, wenn Flashes, Shakes, Speed-Ramps (nur als Ausnahme auf explosiven Sprüngen) oder Übergangseffekte über dem
+Budget in `stil.json` liegen, bei Zeitraffer (Aktionen nie schneller als 1,0×) und bei allem, was nur auf ausdrücklichen Wunsch kommt
+(Glitch, Split, Freeze, Whip, Echo, Text …). Was der Nutzer für ein Reel ausdrücklich will, kommt in die spec als
+`"erlaubt": ["text", "split", "whip"]`; was immer erlaubt ist, in `stil.json` unter `erlaubt`.
 
 ## Effekte
 

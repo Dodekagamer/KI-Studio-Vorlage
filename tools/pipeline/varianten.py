@@ -6,6 +6,7 @@
     python3 varianten.py <reel-ordner> --check            # nur Unterschied-Check der Schnittlisten, rendert nichts
     python3 varianten.py <reel-ordner> --wahl B [--titel <frame>]   # nach der Wahl: Export, Prüfung, Aufräumen
     python3 varianten.py <reel-ordner> --wahl B --fassung v2         # Feedback-Runde: Ausgabe als <name>_v2_…
+    python3 varianten.py <reel-ordner> --wahl B --plattform instagram,youtube   # auch YouTube Shorts
 
 Je Variante X (Ordner schnitt/X/ mit edl.json, fx.json, audio_spec.json aus edl.py): extract.py, render.py master
 -> $REEL_WORK/master_X.mp4, Tonspur -> mix_X.wav, vorschau.py -> <reel>/<name>_X_vorschau.mp4 und
@@ -14,10 +15,13 @@ Die Varianten laufen nacheinander im selben Arbeitsordner; Frames eines Clips we
 
 Unterschied-Check: Jedes Paar soll sich in mindestens 2 von 3 Punkten klar unterscheiden:
   Song      anderer Songabschnitt (Start > 1 Takt auseinander) oder andere Länge
-  Auswahl   höchstens die Hälfte der Clips gleich (Jaccard < 0,5)
+  Auswahl   höchstens die Hälfte der Clips gleich (Jaccard < 0,5), ohne Opener und Finale: Marke, Epic-Shot
+            (Zeitlupen-Shots am Anfang, Regel 11) und Gruppenfoto (Regel 12) dürfen in allen Varianten gleich sein
   Tempo     Shot-Länge im Schnitt ≥ 0,5 Beats anders oder Effekt-Dichte ≥ 30 % anders
 --wahl X: export.py aus master_X/mix_X (Titelbild: Standard Mitte von Shot 1), verify.py gegen
 schnitt/X/edl.json, Storyboard von X als <name>_storyboard.jpg nach oben, alle Varianten-Dateien nach archiv/varianten/.
+--plattform (Standard instagram): youtube schreibt <name>_yt_mit_song.mp4, _yt_ohne_ton.mp4, _yt_titelbild.jpg (Ton
+−14 LUFS, Profil in plattform.py) und prüft sie mit verify.py und plattform.py; beides geht mit Komma.
 Änderungen an der gewählten Variante: schnitt/X/edl.py anpassen, --nur X, dann --wahl X (nach einer Lieferung vorher die
 alte Fassung nach archiv/v1/ und --fassung v2).
 """
@@ -48,8 +52,10 @@ def varianten(reel):
 def kennzahlen(d):
     E = json.load(open(d / "edl.json"))
     shots = [s for s in E["shots"] if not s.get("cont")]
-    clips = {st["clip"] for s in shots if s["clip"] == "split" for st in s["strips"]} | \
-            {s["clip"] for s in shots if s["clip"] != "split"}
+    k = next((i for i, s in enumerate(shots[:2]) if s["mode"] not in ("speed", "slow")), 2)   # Zeitlupen-Opener
+    mitte = shots[max(1, k):-1] if len(shots) > 3 else shots   # Opener, Epic-Shot, Finale nach Regel 11/12 oft gleich
+    clips = {st["clip"] for s in mitte if s["clip"] == "split" for st in s["strips"]} | \
+            {s["clip"] for s in mitte if s["clip"] != "split"}
     beats = E.get("beats") or sum(s["beats"] for s in E["shots"])
     fx = sum(len(s.get("fxp", {}).get("punch", [])) + len(s.get("fxp", {}).get("flash", []))
              + len(s.get("fxp", {}).get("shake", [])) + (s["mode"] in ("ramp", "ramp_hold")) for s in E["shots"])
@@ -73,7 +79,7 @@ def check(reel):
             abs(a["fx_je_16"] - b["fx_je_16"]) >= 0.3 * max(a["fx_je_16"], b["fx_je_16"], 1)
         n = song + (jac < 0.5) + tempo
         print(f"{a['name']}/{b['name']}: Song {'anders' if song else 'gleich'}, "
-              f"Clips {len(a['clips'] & b['clips'])} gemeinsam ({jac:.0%}), Tempo/Effekte {'anders' if tempo else 'ähnlich'}"
+              f"Clips {len(a['clips'] & b['clips'])} gemeinsam ({jac:.0%}, ohne Opener/Finale), Tempo/Effekte {'anders' if tempo else 'ähnlich'}"
               f" -> {n} von 3")
         if n < 2:
             warn.append(f"{a['name']} und {b['name']} unterscheiden sich nur in {n} von 3 Punkten")
@@ -119,7 +125,9 @@ def bauen(reel, nur=None):
     print("Zum Anhängen:\n" + "\n".join(f"  {p}" for p in out))
 
 
-def wahl(reel, x, fassung=None):
+def wahl(reel, x, fassung=None, plattform="instagram"):
+    import plattform as pf
+    profile = pf.plattformen(plattform)
     name = reel.name.split("_", 1)[1] if "_" in reel.name else reel.name
     stem = f"{name}_{fassung}" if fassung else name
     d = reel / "schnitt" / x
@@ -131,9 +139,13 @@ def wahl(reel, x, fassung=None):
     env = dict(os.environ, REEL_WORK=str(WORK), REEL_EDL=str(d / "edl.json"), REEL_FX=str(d / "fx.json"),
                PYTHONDONTWRITEBYTECODE="1")
     py = sys.executable
-    sh([py, PIPE / "export.py", master, reel / stem, mix, "--titel", titel], env, f"export_{x}.log")
-    r = subprocess.run([py, PIPE / "verify.py", reel / f"{stem}_mit_song.mp4"], env=env, capture_output=True, text=True)
-    print(r.stdout.strip())
+    sh([py, PIPE / "export.py", master, reel / stem, mix, "--titel", titel, "--plattform", plattform], env, f"export_{x}.log")
+    ok = True
+    for p in profile:
+        r = subprocess.run([py, PIPE / "verify.py", reel / pf.dateiname(stem, p, "mit_song.mp4")], env=env,
+                           capture_output=True, text=True)
+        print(r.stdout.strip())
+        ok = ok and r.returncode == 0
     arch = reel / "archiv" / "varianten"
     arch.mkdir(parents=True, exist_ok=True)
     sb = reel / f"{name}_{x}_storyboard.jpg"
@@ -141,19 +153,19 @@ def wahl(reel, x, fassung=None):
         shutil.copy2(sb, reel / f"{stem}_storyboard.jpg")
     for p in sorted(reel.glob(f"{name}_[A-Z]_*")):
         shutil.move(str(p), arch / p.name)
-    print(f"Variante {x} exportiert: {stem}_mit_song.mp4, {stem}_ohne_ton.mp4, {stem}_titelbild.jpg (Frame {titel}); "
-          f"Varianten-Dateien in {arch}")
-    return r.returncode == 0
+    dateien = ", ".join(f"{pf.dateiname(stem, p, a)}" for p in profile for a in ("mit_song.mp4", "ohne_ton.mp4", "titelbild.jpg"))
+    print(f"Variante {x} exportiert: {dateien} (Frame {titel}); Varianten-Dateien in {arch}")
+    return ok
 
 
 if __name__ == "__main__":
     pos = [a for a in sys.argv[1:] if not a.startswith("--") and a not in
-           {arg(n) for n in ("--nur", "--wahl", "--titel", "--loop", "--fassung")}]
+           {arg(n) for n in ("--nur", "--wahl", "--titel", "--loop", "--fassung", "--plattform")}]
     if not pos:
         sys.exit(__doc__)
     reel = Path(pos[0]).resolve()
     if "--check" in sys.argv:
         sys.exit(0 if check(reel) else 1)
     if "--wahl" in sys.argv:
-        sys.exit(0 if wahl(reel, arg("--wahl"), arg("--fassung")) else 1)
+        sys.exit(0 if wahl(reel, arg("--wahl"), arg("--fassung"), arg("--plattform", "instagram")) else 1)
     bauen(reel, set(arg("--nur").split(",")) if arg("--nur") else None)

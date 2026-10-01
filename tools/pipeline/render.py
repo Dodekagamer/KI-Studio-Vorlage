@@ -19,7 +19,9 @@ Effekte je Shot in fx.json {"<n>": {...}}, Zeiten in Beats ab Shot-Start:
   focus  [x, y]              Bildausschnitt-Mitte (0–1) für Zooms
   gain   f                   Belichtung zusätzlich zur Automatik
   split_punch [[b, A]…], expand b    nur Split-Shots: Punch auf alle Streifen, ab Beat b öffnet die Mitte ins Vollbild
-Shot-Felder: mode (siehe timing.py), freeze_at, cont (Fortsetzung eines Split-Streifens), strips (Split).
+Shot-Felder: mode (siehe timing.py), freeze_at, cont (Fortsetzung eines Split-Streifens), strips (Split),
+  ueber "blende"   Überblendung in diesen Shot (Stil-Leitfaden Regel 5): beginnt auf dem Schnitt,
+                   dauert blende_frames (Standard 12 = 0,4 s, linear); der Shot davor läuft darunter in seinem Tempo weiter.
 """
 import functools
 import json
@@ -143,15 +145,41 @@ def strip_gain(k, si):
 
 
 def env(u, t0, tau):
-    return np.exp(-(u - t0) / tau) if u >= t0 else 0.0
+    """Hüllkurve eines Treffers bei t0: setzt auf dem Frame ein, der dem Treffer am nächsten liegt. So sitzt ein Punch
+    auf Beat 0 immer auf dem Schnitt-Frame (CUT rundet genauso), auch wenn der Beat knapp hinter dem Frame liegt."""
+    return np.exp(-max(0.0, u - t0) / tau) if u >= t0 - 0.5 / FPS - 1e-9 else 0.0
 
 
 def shot_index(i):
     return max(j for j in range(len(SH)) if CUT[j] <= i)
 
 
+BLENDE = 12   # Frames einer Überblendung (0,4 s, gemessen an Vorbild-Reels)
+
+
+def src_ext(s, u):
+    """Quellzeit und Tempo wie src_at, nach dem Shot-Ende im letzten Tempo weiter (Überblendung in den nächsten Shot)."""
+    d = s["beats"] * PER
+    if u <= d:
+        return src_at(s, u, PER)
+    sp, v = src_at(s, d, PER)
+    return sp + (u - d) * v, v
+
+
 def render_frame(i):
+    """Frame i des Reels; in den ersten Frames eines Shots mit ueber="blende" gemischt mit dem Shot davor."""
     k = shot_index(i)
+    s = SH[k]
+    nb = s.get("blende_frames", BLENDE) if s.get("ueber") == "blende" and k > 0 else 0
+    j = i - CUT[k]
+    if j >= nb:
+        return render_shot(k, i)
+    a = (j + 1) / (nb + 1)
+    mix = (1 - a) * render_shot(k - 1, i).astype(np.float32) + a * render_shot(k, i).astype(np.float32)
+    return (mix + 0.5).astype(np.uint8)
+
+
+def render_shot(k, i):
     s = SH[k]
     fx = FX.get(str(s["n"]), {})
     u = i / FPS - s["t"]
@@ -176,8 +204,8 @@ def render_frame(i):
     dx = dy = rot = 0
     for bh, apx, adeg in fx.get("shake", []):
         uh = bh * PER
-        if u >= uh:
-            t = u - uh
+        if u >= uh - 0.5 / FPS - 1e-9:
+            t = max(0.0, u - uh)
             e = np.exp(-t / 0.14)
             dx += apx * e * np.sin(2 * np.pi * 9 * t + 0.3)
             dy += apx * 0.7 * e * np.sin(2 * np.pi * 11 * t + 1.3)
@@ -193,7 +221,7 @@ def render_frame(i):
     if s["clip"] == "split":
         return render_split(k, s, fx, u, b, dx)
     ss = src(s["clip"])
-    sp, v = src_at(s, u, PER)
+    sp, v = src_ext(s, u)
     exp = max(1 / ss.fps, abs(v) * 0.75 / FPS) if v > 0.05 else 0
     if v <= 1.0 and (ss.fps < 40 or s["mode"] in ("slow", "speed")):
         exp = 0   # Zeitlupe und Echtzeit aus 30 fps: Einzelbild, keine Mittelung
@@ -282,9 +310,13 @@ def preview(idx):
 
 
 def master(out):
+    vf = lut_filter() + "scale=out_color_matrix=bt709:out_range=tv,format=yuv444p"
+    if any(s.get("dialog") for s in SH):     # Dialog-Szenen (dialog.py): Untertitel nach der LUT einbrennen
+        import dialog
+        from untertitel import FONTS
+        vf += f",ass={dialog.untertitel_ass(E, WORK)}:fontsdir={FONTS}"
     ff = subprocess.Popen(["ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "bgr24", "-s", f"{W}x{H}",
-                           "-r", str(FPS), "-i", "-", "-vf",
-                           lut_filter() + "scale=out_color_matrix=bt709:out_range=tv,format=yuv444p",
+                           "-r", str(FPS), "-i", "-", "-vf", vf,
                            "-c:v", "libx264", "-preset", "veryfast", "-crf", "1", "-color_primaries", "bt709",
                            "-color_trc", "bt709", "-colorspace", "bt709", str(out)], stdin=subprocess.PIPE)
     with pool() as p:

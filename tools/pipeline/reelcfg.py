@@ -1,7 +1,7 @@
 """Gemeinsame Pfade, Konstanten und Hilfen der Reel-Pipeline (tools/pipeline/).
 
 Arbeitsordner im Container (groß, gehört nicht in den Projektordner): $REEL_WORK, Standard /home/user/reel
-  manifest.tsv        Clip-Liste <id>\t<name>\t<bytes>, per Drive-Connector search_files erstellen.
+  manifest.tsv        Clip-Liste <id>\t<name>\t<bytes>: drive.py manifest <search_files-Ausgabe> baut sie, drive.py pruefen prüft sie.
                       id "local:<pfad>" nimmt eine Datei aus dem Container statt aus Drive (Tests, schon geladene Clips).
   meta/<stamm>.json, kf/<stamm>/k_*.jpg      aus ingest.py
   frames/<clip>/f_*.jpg + times.json         aus extract.py
@@ -138,12 +138,17 @@ def total_beats(E):
 
 
 def manifest():
-    """Dateistamm -> (id, name, bytes) aus WORK/manifest.tsv."""
+    """Dateistamm -> (id, name, bytes) aus WORK/manifest.tsv. Ein doppelter Stamm überschreibt still den ersten Clip:
+    darum die Warnung (drive.py pruefen nennt die Zeilen)."""
     out = {}
     for line in open(WORK / "manifest.tsv"):
         if line.strip():
             fid, name, size = line.rstrip("\n").split("\t")[:3]
-            out[os.path.splitext(name)[0]] = (fid, name, int(size))
+            stamm = os.path.splitext(name)[0]
+            if stamm in out and out[stamm][0] != fid:
+                print(f"WARNUNG manifest.tsv: {stamm} kommt mit zwei IDs vor, die letzte gilt (drive.py pruefen)",
+                      file=sys.stderr)
+            out[stamm] = (fid, name, int(size))
     return out
 
 
@@ -174,22 +179,9 @@ def md5(path):
 
 
 def download(fid, path, size, logname="download"):
-    """Drive-Download über drive.usercontent.google.com (Ordner-Freigabe "Jeder mit dem Link"),
-    Größenprüfung, 5 Versuche mit Backoff. size <= 0 = unbekannt, nicht prüfen."""
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if fid.startswith("local:"):
-        if path.exists() or path.is_symlink():
-            path.unlink()
-        path.symlink_to(Path(fid[6:]).resolve())
-        return True
-    if path.exists() and size > 0 and path.stat().st_size == size:
-        return True
-    url = f"https://drive.usercontent.google.com/download?id={fid}&export=download&confirm=t"
-    for attempt in range(5):
-        r = run(["curl", "-sS", "-L", "--retry", "2", "-o", path, url])
-        if path.exists() and (size <= 0 or path.stat().st_size == size):
-            return True
-        log(logname, "retry", path.name, attempt, path.stat().st_size if path.exists() else -1, r.stderr[-200:])
-        time.sleep(2 ** attempt)
-    return False
+    """Drive-Download über drive.usercontent.google.com (Ordner-Freigabe "Jeder mit dem Link"). Seit 29.09.2026 in
+    drive.py: Größe per Range-Abfrage, HTML-Fehlerseiten und falscher Dateikopf gelten als Fehler (früher zählte bei
+    size <= 0 jede Antwort als Erfolg), Fortsetzen abgebrochener Übertragungen, endgültige Fehler ohne Wartezeit.
+    size <= 0 = Manifest kennt die Größe nicht. Grund eines Fehlschlags: $REEL_WORK/<logname>.log."""
+    import drive
+    return drive.holen(fid, path, size, logname)

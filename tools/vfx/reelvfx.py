@@ -1312,9 +1312,15 @@ def check_budget(spec, eng=None):
         warn.append(f"{fl} Flashes (Budget {B['flashes']})")
     if names.count("shake") > B["shakes"]:
         warn.append(f"{names.count('shake')}× Shake (Budget {B['shakes']}, nur auf Schlägen/Treffern)")
-    ramps = sum(1 for c in spec.get("clips", []) if c.get("speed") not in (None, 1, 1.0, "normal", "fast", "slow")) + names.count("velocity")
+    # nur Ramp-Kurven zählen (Namen oder Keyframe-Listen), feste Tempi wie 0.75 oder 0.5 sind Zeitlupe
+    ramps = sum(1 for c in spec.get("clips", []) if isinstance(c.get("speed"), (str, list))
+                and c["speed"] not in ("normal", "fast", "slow")) + names.count("velocity")
+    schnell = [Path(str(c.get("file", "?"))).name for c in spec.get("clips", []) if c.get("speed") == "fast"
+               or (isinstance(c.get("speed"), (int, float)) and c["speed"] > 1)]
+    if schnell:
+        warn.append(f"Zeitraffer in {schnell}: Aktionen nie schneller als 1,0× (Stil-Leitfaden, Handwerk)")
     if ramps > B["ramps"]:
-        warn.append(f"{ramps} Speed-Ramps (Budget {B['ramps']})")
+        warn.append(f"{ramps} Speed-Ramps (Budget {B['ramps']}, nur auf explosiven Sprüngen, Landung im Bild)")
     for n in sorted(set(names)):
         g = FX[n]["group"]
         if (n in NUR_AUF_WUNSCH or g in ("Text", "Split")) and n not in erlaubt and g.lower() not in erlaubt and n != "safezones":

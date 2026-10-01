@@ -19,8 +19,10 @@ PROJECT = Path(__file__).resolve().parent.parent
 ROOT_OK = {"README.md", "CLAUDE.md", "EINRICHTUNG.md", ".gitignore", ".git", "Kurzanleitung.md",
            "Reel-Studio_Projektanweisungen.md", "Stil-Leitfaden.md", "stil.json", "reels", "referenz", "tools", "sfx",
            "uploads", ".notes"}
+BIBLIOTHEK = {".mp4", ".mov", ".m4a", ".mp3", ".wav", ".jpg", ".jpeg", ".png", ".heic", ".pdf"}   # Uploads des Nutzers
 ZWISCHEN = re.compile(r"(master|_mix|frames?|prev|raw_\d+|f_\d{5}|k_\d{4})", re.I)
 VARIANTE = re.compile(r"_([A-Z])_(vorschau\.mp4|storyboard\.jpg)$")
+YOUTUBE = re.compile(r"_yt_")   # Dateien der YouTube-Shorts-Fassung (plattform.py): <name>_yt_mit_song.mp4 …
 
 
 def mb(p):
@@ -28,9 +30,13 @@ def mb(p):
 
 
 def main(fix=False):
-    warn = []
+    warn, bib = [], []
     for p in sorted(PROJECT.iterdir()):
-        if p.name not in ROOT_OK:
+        if p.name in ROOT_OK:
+            continue
+        if p.is_file() and p.suffix.lower() in BIBLIOTHEK:
+            bib.append(p.name)            # über die Bibliothek hochgeladen, landet im Root; bleibt dort
+        else:
             warn.append(f"Im Root, gehört woanders hin: {p.name}")
     caches = [p for p in PROJECT.rglob("__pycache__") if "uploads" not in p.parts]
     for c in caches:
@@ -62,21 +68,28 @@ def main(fix=False):
             warn.append(f"{d.name}: README.md (Steckbrief) fehlt")
         if not (d / "schnitt").is_dir():
             warn.append(f"{d.name}: schnitt/ fehlt")
-        top = sorted(p.name for p in d.glob("*_mit_song.mp4"))
+        top = sorted(p.name for p in d.glob("*_mit_song.mp4") if not YOUTUBE.search(p.name))
+        top_yt = sorted(p.name for p in d.glob("*_yt_mit_song.mp4"))
         if len(top) > 1:
             warn.append(f"{d.name}: {len(top)} Fassungen oben ({', '.join(top)}), ältere nach archiv/vN/ verschieben")
-        vor = sorted(p.name for p in d.glob("*_vorschau.mp4") if not VARIANTE.search(p.name))
+        if len(top_yt) > 1:
+            warn.append(f"{d.name}: {len(top_yt)} YouTube-Fassungen oben ({', '.join(top_yt)}), ältere nach archiv/vN/ verschieben")
+        vor = sorted(p.name for p in d.glob("*_vorschau.mp4") if not VARIANTE.search(p.name) and not YOUTUBE.search(p.name))
         if len(vor) > 1:
             warn.append(f"{d.name}: {len(vor)} Vorschau-Videos oben ({', '.join(vor)}), ältere nach archiv/vN/ verschieben")
         var = sorted(p.name for p in d.iterdir() if VARIANTE.search(p.name))
-        if var and top:
+        if var and (top or top_yt):
             warn.append(f"{d.name}: Varianten-Dateien oben, obwohl schon exportiert ({', '.join(var)}); nach der Wahl "
                         f"gehören sie nach archiv/varianten/ (macht varianten.py --wahl)")
         wahl = sorted({VARIANTE.search(n).group(1) for n in var})
         archiv = sorted(p.name for p in (d / "archiv").glob("v*")) if (d / "archiv").exists() else []
-        aktuell = top[0] if top else (f"Varianten {', '.join(wahl)} zur Auswahl" if wahl else "–")
+        aktuell = top[0] if top else (top_yt[0] if top_yt else (f"Varianten {', '.join(wahl)} zur Auswahl" if wahl else "–"))
+        if top and top_yt:
+            aktuell += " + YouTube"
         print(f"  {d.name:32s} {status[:60]:60s} aktuell: {aktuell}"
               + (f", Archiv: {' '.join(archiv)}" if archiv else ""))
+    if bib:
+        print(f"\nBibliothek (Uploads des Nutzers im Root, bleiben dort): {', '.join(bib)}")
     print("\nOrdnung:", "alles sauber" if not warn else f"{len(warn)} Hinweis(e)")
     for w in warn:
         print("  -", w)

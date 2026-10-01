@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reel-QC: prüft ein fertiges Reel (Format, Bild, Beat-Sync, Audio, Loop, Safe-Zones).
+"""Reel-QC: prüft ein fertiges Reel (Format, Bild, Beat-Sync, Audio, Loop; Safe-Zones nur als Overlay mit den Instagram-Zonen, YouTube: pipeline/plattform.py check und ui).
 
 Aufruf:
     python3 reel_qc.py REEL.mp4 [--song SONG.mp3] [--song-json song.json] [--src SEK]
@@ -775,9 +775,9 @@ def run_qc(reel, song=None, song_json=None, src=None, edl=None, outdir=None, str
             problems += [(a / FPS, "kurz") for i, a, l in short]
             beats_total = dur / per
             per16 = len(segs) * 64.0 / beats_total if beats_total else 0
+            # Szenenlänge folgt der Aktion (ganze Wiederholung, ganzer Sprung): kein Richtwert, nur Info
             lo, hi = STIL["budget"]["segmente_16"]
-            st = OK if lo <= round(per16) <= hi else WARN
-            qc.add(G, "Szenen pro 16 Takte", st, f"{per16:.1f}", f"Stil {lo}–{hi}")
+            qc.add(G, "Szenen pro 16 Takte", INFO, f"{per16:.1f}", f"nur Info (Stil-Richtwert {lo}–{hi})")
             res["szenen"] = [{"n": i + 1, "start": a / FPS, "frames": b - a,
                               "beats": round((b - a) / FPS / per, 3)} for i, (a, b) in enumerate(segs)]
         # ---- Beat-Sync der Schnitte/Punches

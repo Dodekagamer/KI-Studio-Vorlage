@@ -4,9 +4,11 @@
     python3 verify.py <reel>_mit_song.mp4 [song-ausschnitt.wav]
 
 Prüft: Format (1080×1920, 30 fps, Frame-Zahl = EDL), jeder Soll-Schnitt ist ein sauberes Maximum der
-Bilddifferenz genau auf seinem Frame, schwarze und eingefrorene Frames (Zeitlupe aus 30 fps fällt hier auf),
-808-Einsätze im Ton gegen die Hits der EDL (Feld "hits", Beats), kein 808-Einsatz in den letzten 150 ms,
-Ton- gleich Bildlänge, Lautheit und True Peak (mit Referenz: Pegelabweichung zum Song in 100-ms-Blöcken).
+Bilddifferenz genau auf seinem Frame (Jump Cuts im selben Clip mit kleinerer Schwelle, Überblendungen nicht),
+schwarze und eingefrorene Frames (Zeitlupe aus 30 fps fällt hier auf), 808-Einsätze im Ton gegen die Hits der EDL
+(Feld "hits", Beats; im Einstieg im Video ist der Song gedämpft, im Ausklang aus, dort nicht), kein 808-Einsatz in
+den letzten 150 ms des Songs, Ton- gleich Bildlänge, Lautheit und True Peak (mit Referenz: Pegelabweichung zum Song in
+100-ms-Blöcken; mit O-Ton und Einstieg weicht der Pegel dort gewollt ab).
 Ergebnis: Zeilen mit OK / PRÜFEN, Exit-Code 1 bei PRÜFEN.
 """
 import json
@@ -58,19 +60,23 @@ def main(video, ref=None):
     n = len(fr)
     say(n == N, f"Frames {n} (EDL: {N})")
     diff = np.array([0] + [np.abs(fr[i] - fr[i - 1]).mean() for i in range(1, n)])
-    # Fortsetzungen (cont, z. B. Split öffnet ins Vollbild) sind absichtlich kein sichtbarer Schnitt
-    cuts = [(s["n"], round(s["t"] * FPS)) for s in shots[1:] if not s.get("cont")]
+    # Fortsetzungen (cont, z. B. Split öffnet ins Vollbild) sind absichtlich kein sichtbarer Schnitt, Überblendungen
+    # auch nicht; ein Jump Cut im selben Clip ändert oft nur die Pose, daher kleinere Schwelle
+    cuts = [(s["n"], round(s["t"] * FPS), 1.2 if s.get("jump") and s["clip"] == shots[i]["clip"] else 1.8)
+            for i, s in enumerate(shots[1:]) if not s.get("cont") and s.get("ueber") != "blende"]
+    blenden = sum(s.get("ueber") == "blende" for s in shots[1:])
     bad = []
-    for k, c in cuts:
+    for k, c, lim in cuts:
         if c >= n:
             bad.append((k, c, "hinter dem Ende"))
             continue
         lo = max(1, c - 2)
         pk = lo + int(np.argmax(diff[lo:c + 3]))
         ratio = diff[c] / (np.median(diff[max(1, c - 6):c - 1]) + 1e-3)
-        if pk != c or ratio < 1.8:
+        if pk != c or ratio < lim:
             bad.append((k, c, f"Max bei {pk}, Faktor {ratio:.1f}"))
-    say(not bad, f"Schnitte {len(cuts) - len(bad)}/{len(cuts)} sauber auf dem Frame" + (f": {bad}" if bad else ""))
+    say(not bad, f"Schnitte {len(cuts) - len(bad)}/{len(cuts)} sauber auf dem Frame" + (f": {bad}" if bad else "")
+        + (f" ({blenden} Überblendung(en) nicht als Schnitt geprüft)" if blenden else ""))
     mean = fr.mean(axis=(1, 2))
     say(int((mean < 8).sum()) == 0, f"schwarze Frames: {int((mean < 8).sum())} (dunkelster Mittelwert {mean.min():.1f})")
     held = set()
@@ -87,8 +93,10 @@ def main(video, ref=None):
     dur_a = len(x) / ra.SR
     say(abs(dur_a - n / FPS) < 1 / FPS, f"Tonlänge {dur_a:.3f} s, Bildlänge {n / FPS:.3f} s")
     on = onsets_808(x)
+    ein, aus = E.get("einstieg", 0), E.get("ausklang", 0)
+    song_end = (total_beats(E) - aus) * per
     worst, missing = 0.0, []
-    for hb in E.get("hits", []):
+    for hb in [h for h in E.get("hits", []) if ein <= h < total_beats(E) - aus]:
         t_exp = round(hb * per * FPS) / FPS
         near = on[np.abs(on - hb * per) < 0.12]
         if len(near):
@@ -98,9 +106,10 @@ def main(video, ref=None):
     if E.get("hits"):
         say(worst <= 1.0 and not missing, f"808 gegen Bild: max. {worst:.2f} Frames Versatz"
             + (f", ohne Einsatz: Beats {missing}" if missing else ""))
-    tail = on[on > dur_a - 0.150]
-    say(len(tail) == 0, "kein 808-Einsatz in den letzten 150 ms" if len(tail) == 0
-        else f"808-Einsatz {dur_a - tail[0]:.3f} s vor dem Ende (Ton endet mitten im Refrain?)")
+    tail = on[(on > song_end - 0.150) & (on < song_end)]
+    wo = "vor dem Song-Ende (danach Ausklang)" if aus else "vor dem Ende"
+    say(len(tail) == 0, f"kein 808-Einsatz in den letzten 150 ms {wo}" if len(tail) == 0
+        else f"808-Einsatz {song_end - tail[0]:.3f} s {wo} (Ton endet mitten im Refrain?)")
     ra.check(video, ref)
 
 

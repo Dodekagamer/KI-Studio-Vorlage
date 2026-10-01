@@ -187,12 +187,15 @@ def _keyframe_times(path):
     return sorted(ts)
 
 
-def iter_frames(path, meta, sample_fps=10, threads=2, schnell=False):
-    """Liefert kleine RGB-Frames (uint8, ~320 px breit) aus ffmpeg (Streaming)."""
+def iter_frames(path, meta, sample_fps=10, threads=2, schnell=False, von=None, bis=None):
+    """Liefert kleine RGB-Frames (uint8, ~320 px breit) aus ffmpeg (Streaming). von/bis: nur dieser Bereich in s
+    (bildgenau ab von, nur im Vollmodus), das erste Bild gehört dann zu von."""
     vf, aw, ah = _filter_chain(meta, sample_fps, schnell)
     cmd = ["ffmpeg", "-v", "error", "-nostdin", "-threads", str(threads)]
     if schnell:
         cmd += ["-skip_frame", "nokey"]
+    elif von is not None:
+        cmd += ["-ss", f"{von:.3f}"] + (["-t", f"{max(0.1, bis - von):.3f}"] if bis is not None else [])
     cmd += ["-noautorotate", "-i", path, "-map", "0:v:0", "-an", "-sn", "-dn",
             "-filter_threads", "1", "-vf", vf]
     if schnell:
@@ -380,13 +383,19 @@ def clip_score_flags(info):
 # ---------------------------------------------------------------- Hauptanalyse
 
 def analyse_clip(path, sample_fps=10, fenster=FENSTER_DEFAULT, threads=2, schnell=False,
-                 name=None, thumbs=True):
-    """Analysiert einen Clip. Gibt ein JSON-faehiges dict (plus private Schluessel '_thumbs', '_hash')."""
+                 name=None, thumbs=True, von=None, bis=None):
+    """Analysiert einen Clip. Gibt ein JSON-faehiges dict (plus private Schluessel '_thumbs', '_hash').
+    von/bis (s, nur Vollmodus): nur dieser Bereich; series.t bleibt die Zeit im Clip, info["bereich"] nennt ihn."""
     t0 = time.time()
     meta = probe(path)
     info = {"name": name or os.path.basename(path), "path": os.path.abspath(path)}
     info.update(meta)
     info["modus"] = "schnell" if schnell else "voll"
+    if von is not None and schnell:
+        raise ValueError("von/bis gibt es nur im Vollmodus")
+    t_off = max(0.0, von or 0.0)
+    if von is not None:
+        info["bereich"] = [round(t_off, 3), round(min(meta["dur"], bis) if bis is not None else meta["dur"], 3)]
     key_ts = _keyframe_times(path) if schnell else None
     _, aw, ah = _filter_chain(meta, sample_fps, schnell)
     gx, gy = _grid(ah, aw)
@@ -399,11 +408,11 @@ def analyse_clip(path, sample_fps=10, fenster=FENSTER_DEFAULT, threads=2, schnel
     stored = []                                 # (t, thumb_rgb)
     prev_g = prev_h = None
     i = 0
-    for rgb in iter_frames(path, meta, sample_fps, threads, schnell):
+    for rgb in iter_frames(path, meta, sample_fps, threads, schnell, von if von is None else t_off, bis):
         if schnell:
             t = key_ts[i] if i < len(key_ts) else (key_ts[-1] + 1.0 if key_ts else float(i))
         else:
-            t = i / sample_fps
+            t = t_off + i / sample_fps
         g = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
         times.append(t)
         luma.append(float(g.mean()))
