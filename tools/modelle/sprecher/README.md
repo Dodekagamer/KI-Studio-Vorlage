@@ -1,6 +1,6 @@
 # Modelle für `tools/analyse/sprecher.py` (Sprecher trennen)
 
-Beide Modelle sind ONNX-Dateien und laufen mit `sherpa-onnx` (PyPI, `pip install sherpa-onnx==1.13.8`, 4 MB) und `onnxruntime` (PyPI, 1.30.0) auf der CPU, ohne torch und ohne Hugging Face. Die Quelle ist jeweils ein GitHub-Release von k2-fsa/sherpa-onnx (am 30.09.2026 geladen, Adresse liefert HTTP 200). Hugging Face ist in NCZ gesperrt.
+Beide Modelle sind ONNX-Dateien und laufen mit `sherpa-onnx` (PyPI, `pip install sherpa-onnx==1.13.8`, 4 MB) und `onnxruntime` (PyPI, 1.30.0) auf der CPU, ohne torch und ohne Hugging Face. Die Quelle ist jeweils ein GitHub-Release von k2-fsa/sherpa-onnx (am 30.09.2026 geladen, Adresse liefert HTTP 200). Hugging Face ist in manchen Umgebungen gesperrt.
 
 ## Segmentierung: `segmentierung_pyannote_3.0.onnx`
 
